@@ -1,0 +1,10 @@
+bin/
+obj/
+publish/
+*.exe
+*.log
+*.user
+.vs/
+backup*/
+remote-helper.json
+arm.state
