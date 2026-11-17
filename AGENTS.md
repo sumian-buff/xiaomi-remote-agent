@@ -42,7 +42,8 @@
 
 在 `xiaomi_config.py` 的预设里加入 `agent`（显示名「Claude + Codex」），放在预设列表第一位，作为全新安装时的默认预设。可以保留上游的 codex / workbuddy / wechat / qianwen 预设。
 
-语音：快捷键 `ctrl+d`，模式 `toggle`（麦克风按下时轻点一次 Ctrl+D，松开时再轻点一次）。默认增益改成 **4 dB**（上游默认 10 dB，实测大多数录音会削波）。
+语音：快捷键 `ctrl+d`，模式 **`hold`**（麦克风按住期间一直按住 Ctrl+D，松开时一起松开）。
+Claude 和 Codex 的听写快捷键都是「长按 Ctrl+D」；实测用 `toggle`（轻点两次）时，两个应用的听写都不会启动（2026-11-17 重启后验证）。默认增益改成 **4 dB**（上游默认 10 dB，实测大多数录音会削波）。
 
 按键（`helper:` 表示调用随程序一起发布的 `remote-helper.exe`，见 2.4）：
 
@@ -90,7 +91,7 @@ Claude 的听写使用 Windows 默认录音设备。在「环境检查」里增�
 
 ### 2.7 文档
 
-- 根目录 `README.md` 改写成用户说明：用途、按键表（第 3 节）、需要准备什么（蓝牙、VB-CABLE、Claude/Codex）、安装步骤、应用里要做的设置（Codex：语音输入切换型快捷键 Ctrl+D、麦克风 CABLE Output；侧边栏上一项/下一项绑定 Ctrl+Shift+F1/F2）、致谢与 GPL 说明。
+- 根目录 `README.md` 改写成用户说明：用途、按键表（第 3 节）、需要准备什么（蓝牙、VB-CABLE、Claude/Codex）、安装步骤、应用里要做的设置（Codex：语音输入快捷键长按 Ctrl+D、麦克风 CABLE Output；侧边栏上一项/下一项绑定 Ctrl+Shift+F1/F2）、致谢与 GPL 说明。
 - 根目录 `LICENSE` 换成 GPL-3.0 全文（直接复制 `app/LICENSE`）。
 - 删除根目录的 `src/` 与 `scripts/`（内容已移到 `app/helper/`）。
 

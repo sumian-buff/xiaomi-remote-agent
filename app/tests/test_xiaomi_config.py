@@ -115,7 +115,7 @@ class XiaomiConfigTests(unittest.TestCase):
         config = default_config()
         self.assertEqual(config["active_preset"], "agent")
         self.assertEqual(config["voice_hotkey"], "ctrl+d")
-        self.assertEqual(config["voice_trigger_mode"], "toggle")
+        self.assertEqual(config["voice_trigger_mode"], "hold")
         self.assertEqual(config["gain_db"], 4.0)
         self.assertEqual(config["volume_repeat_delay"], 0.40)
         self.assertEqual(config["volume_repeat_interval"], 0.12)
@@ -140,7 +140,7 @@ class XiaomiConfigTests(unittest.TestCase):
             ("workbuddy", "ctrl+d", "toggle"),
             ("wechat", "ctrl+win", "hold"),
             ("qianwen", "rightctrl", "toggle"),
-            ("agent", "ctrl+d", "toggle"),
+            ("agent", "ctrl+d", "hold"),
         ):
             with self.subTest(preset=preset):
                 self.assertEqual(xiaomi_config.cycle_preset_configuration(config, keys), preset)

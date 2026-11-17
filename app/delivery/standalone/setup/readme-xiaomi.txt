@@ -7,7 +7,7 @@ Xiaomi Remote Agent 0.1.21
 首次使用
 1. 准备 Windows 蓝牙、已配对的遥控器、VB-CABLE 和 Claude / Codex。
 2. 从资源管理器或本程序的开始菜单快捷方式启动 XiaomiRemoteAgent.exe。不要从 Claude 内置终端或 WMI 启动正式程序，以免 APPDATA 被重定向。
-3. “按键与语音设置”选 Claude + Codex：Ctrl+D、开关型、增益 4 dB。
+3. “按键与语音设置”选 Claude + Codex：Ctrl+D、按住型、增益 4 dB。
 4. Codex 语音切换快捷键设为 Ctrl+D，麦克风选 CABLE Output；上一/下一侧边栏项目绑定 Ctrl+Shift+F1 / F2。
 5. Claude 使用 Ctrl+D 听写。在“环境检查”点击“把默认录音设备设为 CABLE Output”。只更改普通和多媒体角色（eConsole=0、eMultimedia=1），不更改通信角色（eCommunications=2）。需要时点击“恢复原录音设备”。退出程序不自动恢复。
 6. 首次完整返回键接管可能要求一次管理员确认：Frida Gadget 兼容层读取返回键 HID 报告。此确认与普通控制台黑框不同。

@@ -22,7 +22,7 @@ APP_VERSION = os.environ.get("XIAOMI_REMOTE_AGENT_XIAOMI_VERSION", APP_VERSION)
 MAPPING_SCHEMA_VERSION = 3
 
 AGENT_VOICE_HOTKEY = ("ctrl", "d")
-AGENT_VOICE_TRIGGER_MODE = "toggle"
+AGENT_VOICE_TRIGGER_MODE = "hold"  # Claude and Codex dictation: hold Ctrl+D while talking
 DEFAULT_GAIN_DB = 4.0
 
 CODEX_VOICE_HOTKEY = ("rightalt",)
