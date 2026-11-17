@@ -1,4 +1,4 @@
-Xiaomi Remote Agent 0.1.22
+Xiaomi Remote Agent 0.1.23
 
 用途
 把小米蓝牙语音遥控器 2 / 2 Pro 用于 Claude / Codex 桌面版。无需安装 MiVibe Remote；已安装 MiVibe 时请先从托盘退出，两者不能同时连接遥控器。
@@ -8,7 +8,7 @@ Xiaomi Remote Agent 0.1.22
 1. 准备 Windows 蓝牙、已配对的遥控器、VB-CABLE 和 Claude / Codex。
 2. 从资源管理器或本程序的开始菜单快捷方式启动 XiaomiRemoteAgent.exe。不要从 Claude 内置终端或 WMI 启动正式程序，以免 APPDATA 被重定向。
 3. “按键与语音设置”选 Claude + Codex：Ctrl+D、按住型、增益 4 dB。
-4. Codex 语音切换快捷键设为 Ctrl+D，麦克风选 CABLE Output；上一/下一侧边栏项目绑定 Ctrl+Shift+F1 / F2。
+4. Codex 语音快捷键设为长按 Ctrl+D，麦克风选 CABLE Output；上一/下一侧边栏项目绑定 Ctrl+Shift+F1 / F2。
 5. Claude 使用 Ctrl+D 听写。在“环境检查”点击“把默认录音设备设为 CABLE Output”。只更改普通和多媒体角色（eConsole=0、eMultimedia=1），不更改通信角色（eCommunications=2）。需要时点击“恢复原录音设备”。退出程序不自动恢复。
 6. 首次完整返回键接管可能要求一次管理员确认：Frida Gadget 兼容层读取返回键 HID 报告。此确认与普通控制台黑框不同。
 
@@ -18,8 +18,8 @@ Xiaomi Remote Agent 0.1.22
 TV：切到 Codex 主窗口，跳过透明工具浮层。
 电源：Esc，中断 agent。
 OK：发送；Claude 选项卡片选中并提交，“其他”输入框也能提交，提交后回到输入框。
-上/下：先进入 Claude 选项卡片，再移动选项；无卡片时为普通方向键。
-左/右：Claude 输入为空时点回复末尾第一个/第二个建议；Codex 切上一个/下一个会话。
+上/下：先进入 Claude 选项卡片，再移动选项；输入框为空、无卡片时，「下」在 Claude 里从最新消息分叉，在 Codex 里为 Tab（采纳建议）；其他时候为普通方向键。
+左/右：Claude 输入为空时点回复末尾第一个/第二个建议；其他时候为方向键。切换会话：先按菜单（Claude）或 TV（Codex），3 秒内按左/右。
 音量+/-：滚动对话，必要时自动移动鼠标；按住连滚，松开停止。
 返回：退格，按住连删。主页：在当前应用里新建会话（Claude 发 Ctrl+N，Codex 点「新聊天」）。
 

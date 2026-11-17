@@ -2,9 +2,8 @@
 // remote-helper.exe — actions for Xiaomi Remote Agent.
 //
 //   remote-helper.exe activate <AUMID>   bring a packaged app (e.g. Claude, Codex) to the front, or start it
-//   remote-helper.exe session prev|next  left/right keys: previous/next session in the active app, using that
-//                                        app's shortcut from remote-helper.json; plain Left/Right if it has none
-//                                        or while the prompt box holds unsent text
+//   remote-helper.exe session prev|next  left/right keys: within armSeconds after Menu/TV (activate) =
+//                                        previous/next session; otherwise Claude suggestion buttons or plain arrows
 //   remote-helper.exe arrow up|down      up/down keys: Claude cards; in an empty prompt, an app's downWhenEmpty
 //                                        key (Codex: Tab = accept its suggested next prompt)
 //   remote-helper.exe scroll <delta>     volume keys: scroll the conversation under an auto-placed cursor
@@ -52,6 +51,9 @@ static class Helper
                     if (args.Length != 2) return 2;
                     ExportApps(args[1]); return 0;
                 case "shortcut": Lnk.Create(args[1], args[2]); return 0;
+                case "sidebar":   // read-only diagnostics: write what the Claude helpers would act on, click nothing
+                    if (args.Length != 2) return 2;
+                    DumpClaude(args[1]); return 0;
             }
             return 2;
         }
@@ -112,20 +114,82 @@ static class Helper
 
     // ---------- scroll / session switch ----------
 
+    // Left/Right.
+    //   Within armSeconds after Menu/TV (activate), or after a previous switch: previous/next session
+    //   (Claude: sidebar order; other apps: their prev/next shortcut). A deliberate combo, because a bare
+    //   Left/Right also clicks suggestion buttons and switching by accident is confusing.
+    //   Otherwise: Claude with an empty prompt and a suggestion box -> press its first/second button;
+    //   everything else -> plain arrow keys.
+    static readonly string ArmFile = Path.Combine(Dir, "session-arm.state");
+
+    // Short decision trace for session switching (remote-helper-trace.log, capped at ~200 KB).
+    static readonly string TraceFile = Path.Combine(Dir, "remote-helper-trace.log");
+    static void Trace(string message)
+    {
+        try
+        {
+            var fi = new FileInfo(TraceFile);
+            if (fi.Exists && fi.Length > 200000) fi.Delete();
+            File.AppendAllText(TraceFile, DateTime.Now.ToString("HH:mm:ss.fff") + " [" + Process.GetCurrentProcess().Id + "] " + message + Environment.NewLine);
+        }
+        catch { }
+    }
+
+    static void ArmSessionSwitch()
+    {
+        try { File.WriteAllText(ArmFile, DateTime.UtcNow.Ticks.ToString()); } catch { }
+    }
+
+    static bool SessionSwitchArmed(Settings cfg)
+    {
+        try
+        {
+            long t = long.Parse(File.ReadAllText(ArmFile).Trim());
+            return (DateTime.UtcNow - new DateTime(t, DateTimeKind.Utc)).TotalSeconds <= cfg.armSeconds;
+        }
+        catch { return false; }
+    }
+
     static void Session(Settings cfg, bool prev)
     {
         IntPtr fg = GetForegroundWindow();
+        bool armed = SessionSwitchArmed(cfg);
+        Trace("session " + (prev ? "prev" : "next") + " armed=" + armed + " claude=" + IsClaude(fg) + " fg=" + ProcessPath(fg));
+        if (armed)
+        {
+            // Rapid presses start several helpers at once; queue them so each switch starts from the
+            // session the previous one opened (otherwise they all read the same sidebar and collide).
+            using (var queue = new Mutex(false, "Local\\XiaomiRemoteAgent.SessionSwitch"))
+            {
+                bool owned = false;
+                try { owned = queue.WaitOne(15000); } catch (AbandonedMutexException) { owned = true; }
+                if (!owned) return;
+                try
+                {
+                    bool done = false;
+                    fg = GetForegroundWindow();
+                    if (IsClaude(fg))
+                    {
+                        try { done = SwitchClaudeSession(fg, prev); }
+                        catch (Exception e) { try { File.AppendAllText(LogFile, DateTime.Now.ToString("s") + " claude session: " + e.Message + Environment.NewLine); } catch { } }
+                    }
+                    else
+                    {
+                        AppKeys keys = KeysFor(cfg, ProcessPath(fg));
+                        string combo = keys == null ? null : (prev ? keys.prev : keys.next);
+                        if (!string.IsNullOrEmpty(combo)) { SendCombo(combo); Thread.Sleep(300); done = true; }
+                    }
+                    if (done) { ArmSessionSwitch(); return; }   // keep the window open so you can keep stepping
+                }
+                finally { queue.ReleaseMutex(); }
+            }
+        }
         if (IsClaude(fg))
         {
             try { if (ClickClaudeSuggestion(fg, prev ? 0 : 1)) return; }
             catch (Exception e) { try { File.AppendAllText(LogFile, DateTime.Now.ToString("s") + " suggestion: " + e.Message + Environment.NewLine); } catch { } }
         }
-        // Other apps (Codex): while the prompt box holds unsent text, Left/Right stay plain arrows so the
-        // cursor can move inside that text; only an empty prompt switches sessions.
-        if (PromptHasText()) { SendCombo(prev ? "left" : "right"); return; }
-        AppKeys keys = KeysFor(cfg, ProcessPath(fg));
-        string combo = keys == null ? null : (prev ? keys.prev : keys.next);
-        SendCombo(string.IsNullOrEmpty(combo) ? (prev ? "left" : "right") : combo);
+        SendCombo(prev ? "left" : "right");
     }
 
     // True when keyboard focus is in a ProseMirror prompt box (Claude and Codex both use one) that
@@ -209,7 +273,12 @@ static class Helper
         IntPtr fg = GetForegroundWindow();
         if (IsClaude(fg))
         {
-            try { if (FocusClaudeCard(fg, up)) return; }
+            try
+            {
+                if (FocusClaudeCard(fg, up)) return;
+                // No card: Down in an empty prompt forks the conversation at its newest message.
+                if (!up && FocusInEmptyPrompt() && ForkClaudeAtLatest(fg)) return;
+            }
             catch (Exception e) { try { File.AppendAllText(LogFile, DateTime.Now.ToString("s") + " arrow: " + e.Message + Environment.NewLine); } catch { } }
         }
         else if (!up)
@@ -222,6 +291,130 @@ static class Helper
             }
         }
         SendCombo(up ? "up" : "down");
+    }
+
+    // ---------- Claude sidebar sessions and forks ----------
+    //
+    // Sidebar (Claude desktop 5.x): nav buttons (新建, 搜索, …) on top; then project groups — header
+    // buttons such as "companion" with ExpandCollapse and a "hide-focus-ring" class — each followed by its
+    // sessions (buttons whose class starts with "w-full shrink-0 border-none", named "<title>",
+    // "<title> 运行中" or "<title> 从 <parent> 分叉"). Nested-session toggles ("显示 N 个嵌套会话 …",
+    // "隐藏嵌套会话 …") share the header class and are excluded. The current session's title comes from
+    // the header button "<title>，重命名会话". Every message has a 从此处分叉 (fork) button.
+
+    static readonly string[] RenameSuffixes = { "，重命名会话", ", rename session", ", Rename session" };
+    static readonly string[] ForkButtonNames = { "从此处分叉", "Fork from here", "Branch from here" };
+
+    class ClaudeSidebar
+    {
+        public string Title;
+        public List<AutomationElement> Sessions = new List<AutomationElement>();
+        public List<string> Names = new List<string>();
+        public int Current = -1;
+        public AutomationElement LatestFork;
+        public int ForkCount;
+    }
+
+    static bool IsNestedToggle(string name)
+    {
+        return name.StartsWith("隐藏嵌套会话") || (name.StartsWith("显示 ") && name.Contains("嵌套会话"))
+            || name.StartsWith("Show ") || name.StartsWith("Hide ");
+    }
+
+    static ClaudeSidebar ReadClaudeSidebar(IntPtr hwnd)
+    {
+        var info = new ClaudeSidebar();
+        var root = AutomationElement.FromHandle(hwnd);
+        var cache = new CacheRequest();
+        cache.Add(AutomationElement.NameProperty);
+        cache.Add(AutomationElement.ClassNameProperty);
+        cache.Add(AutomationElement.BoundingRectangleProperty);
+        cache.Add(AutomationElement.IsExpandCollapsePatternAvailableProperty);
+        cache.AutomationElementMode = AutomationElementMode.Full;
+        AutomationElementCollection buttons;
+        using (cache.Activate())
+            buttons = root.FindAll(TreeScope.Descendants,
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button));
+
+        double firstGroupTop = double.MaxValue;
+        var candidates = new List<KeyValuePair<double, AutomationElement>>();
+        foreach (AutomationElement b in buttons)
+        {
+            string name = (b.Cached.Name ?? "").Trim();
+            string cls = b.Cached.ClassName ?? "";
+            var rect = b.Cached.BoundingRectangle;
+            foreach (var suffix in RenameSuffixes)
+                if (info.Title == null && name.EndsWith(suffix)) info.Title = name.Substring(0, name.Length - suffix.Length).Trim();
+            if (Array.IndexOf(ForkButtonNames, name) >= 0) { info.LatestFork = b; info.ForkCount++; }   // last = newest message
+            if (rect.IsEmpty) continue;
+            bool canExpand = (bool)b.GetCachedPropertyValue(AutomationElement.IsExpandCollapsePatternAvailableProperty);
+            if (canExpand && cls.Contains("hide-focus-ring") && !IsNestedToggle(name) && rect.Top < firstGroupTop)
+                firstGroupTop = rect.Top;
+            if (cls.StartsWith("w-full shrink-0 border-none")) candidates.Add(new KeyValuePair<double, AutomationElement>(rect.Top, b));
+        }
+        candidates.Sort((a, c) => a.Key.CompareTo(c.Key));
+        foreach (var kv in candidates)
+        {
+            if (kv.Key <= firstGroupTop) continue;   // nav buttons above the first project group
+            string name = (kv.Value.Cached.Name ?? "").Trim();
+            if (info.Current < 0 && info.Title != null && (name == info.Title || name.StartsWith(info.Title + " ")))
+                info.Current = info.Sessions.Count;
+            info.Sessions.Add(kv.Value);
+            info.Names.Add(name);
+        }
+        return info;
+    }
+
+    // Left/Right with an empty prompt: open the previous/next session in sidebar order (across projects,
+    // including expanded forks). At either end nothing happens.
+    static bool SwitchClaudeSession(IntPtr fg, bool prev)
+    {
+        var info = ReadClaudeSidebar(fg);
+        int target = info.Current < 0 ? 0 : info.Current + (prev ? -1 : 1);
+        Trace("  sidebar title='" + info.Title + "' current=" + info.Current + "/" + info.Sessions.Count
+              + " target=" + target + (target >= 0 && target < info.Names.Count ? " '" + info.Names[target] + "'" : ""));
+        if (info.Sessions.Count == 0) return false;   // sidebar hidden: fall back to plain arrows
+        if (target < 0 || target >= info.Sessions.Count) return true;
+        InvokeOrEnter(info.Sessions[target]);
+        Thread.Sleep(700);
+        try { FocusClaudePrompt(fg); } catch { }
+        return true;
+    }
+
+    // Down with an empty prompt and no card: fork the conversation at its newest message.
+    static bool ForkClaudeAtLatest(IntPtr fg)
+    {
+        var info = ReadClaudeSidebar(fg);
+        if (info.LatestFork == null) return false;
+        InvokeOrEnter(info.LatestFork);
+        Thread.Sleep(900);
+        try { FocusClaudePrompt(fg); } catch { }
+        return true;
+    }
+
+    static void InvokeOrEnter(AutomationElement e)
+    {
+        object ip;
+        if (e.TryGetCurrentPattern(InvokePattern.Pattern, out ip)) ((InvokePattern)ip).Invoke();
+        else { e.SetFocus(); Thread.Sleep(50); SendCombo("enter"); }
+    }
+
+    static void DumpClaude(string outputPath)
+    {
+        IntPtr hwnd = IntPtr.Zero;
+        foreach (var p in Process.GetProcessesByName("claude"))
+            if (p.MainWindowHandle != IntPtr.Zero && p.MainWindowTitle == "Claude") { hwnd = p.MainWindowHandle; break; }
+        var sb = new StringBuilder();
+        if (hwnd == IntPtr.Zero) sb.AppendLine("Claude window not found");
+        else
+        {
+            var info = ReadClaudeSidebar(hwnd);
+            sb.AppendLine("title: " + info.Title);
+            sb.AppendLine("current index: " + info.Current + " of " + info.Sessions.Count);
+            for (int i = 0; i < info.Names.Count; i++) sb.AppendLine((i == info.Current ? " -> " : "    ") + i + "  " + info.Names[i]);
+            sb.AppendLine("fork buttons: " + info.ForkCount + (info.LatestFork != null ? " (latest found)" : ""));
+        }
+        File.WriteAllText(outputPath, sb.ToString(), new UTF8Encoding(false));
     }
 
     static bool IsClaude(IntPtr hwnd)
@@ -460,6 +653,8 @@ static class Helper
 
     static void Activate(string aumid)
     {
+        ArmSessionSwitch();   // Menu/TV then Left/Right within armSeconds = switch session
+        Trace("activate " + aumid + " (armed)");
         if (aumid.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException("AppID required; shortcuts are not supported");
         // Retained optional desktop-app presets use their shell AppIDs too.
@@ -558,6 +753,8 @@ static class Helper
     public class Settings
     {
         public int scrollDelta = 240;
+        // Seconds after Menu/TV (or the last switch) during which Left/Right switch sessions.
+        public double armSeconds = 3;
         // The cursor is moved to (targetX, targetY) of the active window unless it is already inside the
         // area box — so scrolling hits the conversation, not the sidebar or the input box.
         public double targetX = 0.45, targetY = 0.40;

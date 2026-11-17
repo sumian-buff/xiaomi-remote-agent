@@ -26,7 +26,7 @@ from process_utils import CREATE_NO_WINDOW, hidden_startupinfo
 
 
 APP_NAME = "Xiaomi Remote Agent"
-APP_VERSION = "0.1.22"
+APP_VERSION = "0.1.23"
 APP_ID = "XiaomiRemoteAgent"
 CONTROL_PORT = 32690
 

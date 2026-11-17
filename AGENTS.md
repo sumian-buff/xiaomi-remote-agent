@@ -58,7 +58,8 @@ Claude 和 Codex 的听写快捷键都是「长按 Ctrl+D」；实测用 `toggle
 | 左 / 右 | `helper: session prev` / `helper: session next` |
 | 音量 + / − | `helper: scroll 240` / `helper: scroll -240`（必须保留上游的音量键长按连发） |
 | 上 / 下（补充） | Codex：焦点在**空的**输入框（ProseMirror，名称「和 Codex 一起工作」）时，「下」发 `remote-helper.json` 里的 `downWhenEmpty`（Codex 默认 `tab`，即采纳建议的下一句）；输入框有字时仍是方向键 |
-| 左 / 右（补充） | 非 Claude 应用：输入框里有未发送的文字时，左右是普通方向键（移动光标）；输入框为空时才切换会话 |
+| 上 / 下（Claude 补充） | 输入框为空且没有选项卡片时，「下」= 点**最新一条**消息的「从此处分叉」按钮（UIA 里最后一个），然后聚焦新输入框 |
+| 左 / 右（补充） | **切换会话只用组合键**：`helper: activate`（菜单 / TV）会写入 `session-arm.state`，之后 `armSeconds`（默认 3 秒）内的左 / 右 = 上一个 / 下一个会话，每切一次重新计时。Claude 按侧边栏顺序切换（见 remote-helper.cs 的 ReadClaudeSidebar：项目分组按钮带 ExpandCollapse，会话按钮的类名以 `w-full shrink-0 border-none` 开头，当前会话来自标题按钮「<标题>，重命名会话」）；其他应用发各自的 prev/next 快捷键。连按时多个 helper 进程用命名互斥量 `Local\XiaomiRemoteAgent.SessionSwitch` 排队，否则它们会同时读到同一个当前会话、互相冲突。不在计时内时：Claude 有建议框就点按钮，否则普通方向键。决策过程写在程序目录的 `remote-helper-trace.log`（约 200 KB 封顶） |
 | 主页 | `helper: new`：新建会话。Claude 发 Ctrl+N（它「新建」按钮的 AcceleratorKey），然后聚焦新输入框；Codex 没有公开快捷键，用 UIA 点名称为「新聊天」/ New chat 的按钮。`remote-helper.json` 里各应用的 `newSession` 可以覆盖 |
 
 AUMID 不要写死：启动时枚举 `shell:AppsFolder`（或读取开始菜单应用列表），找名称为 Claude、AppID 形如 `Claude_*!Claude` 的项，以及 AppID 形如 `OpenAI.Codex_*!App` 的项（Codex 在开始菜单里叫 ChatGPT）。
@@ -107,7 +108,8 @@ Claude 的听写使用 Windows 默认录音设备。在「环境检查」里增�
 | 电源 | Esc 中断 agent |
 | OK | 发送；在 Claude 选项卡片上时选中并提交；在「其他」输入框里时提交；提交后光标回到输入框 |
 | 上 / 下 | 有选项卡片时第一下进入卡片，之后在选项间移动；没有卡片时是普通方向键 |
-| 左 / 右 | Claude：输入框为空时点回复末尾建议框的第一个 / 第二个按钮；Codex：上一个 / 下一个会话 |
+| 左 / 右 | Claude：输入框为空时点回复末尾建议框的第一个 / 第二个按钮；菜单 / TV 后 3 秒内：上一个 / 下一个会话（连按逐个切换） |
+| 下（Claude） | 输入框为空、没有卡片时，从最新一条消息分叉 |
 | 音量 + / − | 滚动对话，鼠标不在对话区时自动移过去；按住连续滚 |
 | 返回 / 主页 | 退格（按住连删）/ 在当前应用里新建会话 |
 | 启动 / 开机自启 | 不弹任何黑框；遥控器休眠唤醒后自动重连 |
