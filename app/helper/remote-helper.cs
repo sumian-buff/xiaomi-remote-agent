@@ -4,6 +4,9 @@
 //   remote-helper.exe activate <AUMID>   bring a packaged app (e.g. Claude, Codex) to the front, or start it
 //   remote-helper.exe session prev|next  left/right keys: previous/next session in the active app, using that
 //                                        app's shortcut from remote-helper.json; plain Left/Right if it has none
+//                                        or while the prompt box holds unsent text
+//   remote-helper.exe arrow up|down      up/down keys: Claude cards; in an empty prompt, an app's downWhenEmpty
+//                                        key (Codex: Tab = accept its suggested next prompt)
 //   remote-helper.exe scroll <delta>     volume keys: scroll the conversation under an auto-placed cursor
 //   remote-helper.exe new                Home key: new session/chat in the active app (its "newSession" shortcut
 //                                        from remote-helper.json, else press its 新聊天 / New chat button)
@@ -41,7 +44,7 @@ static class Helper
             {
                 case "activate": Activate(args[1]); return 0;
                 case "session": Session(cfg, args[1].ToLowerInvariant() == "prev"); return 0;
-                case "arrow": Arrow(args[1].ToLowerInvariant() == "up"); return 0;
+                case "arrow": Arrow(cfg, args[1].ToLowerInvariant() == "up"); return 0;
                 case "ok": Ok(); return 0;
                 case "new": NewSession(cfg); return 0;
                 case "scroll": Scroll(cfg, args.Length > 1 ? int.Parse(args[1]) : cfg.scrollDelta); return 0;
@@ -117,9 +120,38 @@ static class Helper
             try { if (ClickClaudeSuggestion(fg, prev ? 0 : 1)) return; }
             catch (Exception e) { try { File.AppendAllText(LogFile, DateTime.Now.ToString("s") + " suggestion: " + e.Message + Environment.NewLine); } catch { } }
         }
+        // Other apps (Codex): while the prompt box holds unsent text, Left/Right stay plain arrows so the
+        // cursor can move inside that text; only an empty prompt switches sessions.
+        if (PromptHasText()) { SendCombo(prev ? "left" : "right"); return; }
         AppKeys keys = KeysFor(cfg, ProcessPath(fg));
         string combo = keys == null ? null : (prev ? keys.prev : keys.next);
         SendCombo(string.IsNullOrEmpty(combo) ? (prev ? "left" : "right") : combo);
+    }
+
+    // True when keyboard focus is in a ProseMirror prompt box (Claude and Codex both use one) that
+    // contains text. Errors count as "no text" so the quick actions keep working.
+    static bool PromptHasText()
+    {
+        try
+        {
+            var f = AutomationElement.FocusedElement;
+            if (f == null || (f.Current.ClassName ?? "").IndexOf("ProseMirror", StringComparison.Ordinal) < 0) return false;
+            object vp;
+            return f.TryGetCurrentPattern(ValuePattern.Pattern, out vp) && ((ValuePattern)vp).Current.Value.Trim().Length > 0;
+        }
+        catch { return false; }
+    }
+
+    static bool FocusInEmptyPrompt()
+    {
+        try
+        {
+            var f = AutomationElement.FocusedElement;
+            if (f == null || (f.Current.ClassName ?? "").IndexOf("ProseMirror", StringComparison.Ordinal) < 0) return false;
+            object vp;
+            return !f.TryGetCurrentPattern(ValuePattern.Pattern, out vp) || ((ValuePattern)vp).Current.Value.Trim().Length == 0;
+        }
+        catch { return false; }
     }
 
     // Home key: start a new session in the active app.
@@ -170,13 +202,24 @@ static class Helper
     // Up/Down. In Claude, a question or approval card does not take keyboard focus: it stays in the
     // prompt box, where Up/Down recall history. So if such a card is showing and focus is not already
     // inside it, the first press moves focus to the card's first (Down) or last (Up) option instead.
-    static void Arrow(bool up)
+    // Other apps: an app's "downWhenEmpty" key (Codex: Tab, which accepts its suggested next prompt) is
+    // sent instead of Down, but only while focus is in an empty prompt box.
+    static void Arrow(Settings cfg, bool up)
     {
         IntPtr fg = GetForegroundWindow();
         if (IsClaude(fg))
         {
             try { if (FocusClaudeCard(fg, up)) return; }
             catch (Exception e) { try { File.AppendAllText(LogFile, DateTime.Now.ToString("s") + " arrow: " + e.Message + Environment.NewLine); } catch { } }
+        }
+        else if (!up)
+        {
+            AppKeys keys = KeysFor(cfg, ProcessPath(fg));
+            if (keys != null && !string.IsNullOrEmpty(keys.downWhenEmpty) && FocusInEmptyPrompt())
+            {
+                SendCombo(keys.downWhenEmpty);
+                return;
+            }
         }
         SendCombo(up ? "up" : "down");
     }
@@ -511,7 +554,7 @@ static class Helper
 
     // ---------- settings ----------
 
-    public class AppKeys { public string name; public string match; public string prev; public string next; public string newSession; }
+    public class AppKeys { public string name; public string match; public string prev; public string next; public string newSession; public string downWhenEmpty; }
     public class Settings
     {
         public int scrollDelta = 240;
@@ -526,8 +569,8 @@ static class Helper
             var js = new JavaScriptSerializer();
             if (File.Exists(path)) return js.Deserialize<Settings>(File.ReadAllText(path, Encoding.UTF8));
             var s = new Settings();
-            s.apps.Add(new AppKeys { name = "Codex", match = "\\OpenAI.Codex_", prev = "ctrl+shift+f1", next = "ctrl+shift+f2", newSession = "" });
-            s.apps.Add(new AppKeys { name = "Claude", match = "\\Claude_", prev = "", next = "", newSession = "ctrl+n" });
+            s.apps.Add(new AppKeys { name = "Codex", match = "\\OpenAI.Codex_", prev = "ctrl+shift+f1", next = "ctrl+shift+f2", newSession = "", downWhenEmpty = "tab" });
+            s.apps.Add(new AppKeys { name = "Claude", match = "\\Claude_", prev = "", next = "", newSession = "ctrl+n", downWhenEmpty = "" });
             File.WriteAllText(path, Pretty(js.Serialize(s)), new UTF8Encoding(false));
             return s;
         }

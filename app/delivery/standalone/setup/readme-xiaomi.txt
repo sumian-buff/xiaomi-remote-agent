@@ -1,4 +1,4 @@
-Xiaomi Remote Agent 0.1.21
+Xiaomi Remote Agent 0.1.22
 
 用途
 把小米蓝牙语音遥控器 2 / 2 Pro 用于 Claude / Codex 桌面版。无需安装 MiVibe Remote；已安装 MiVibe 时请先从托盘退出，两者不能同时连接遥控器。

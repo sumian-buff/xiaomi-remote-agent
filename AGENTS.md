@@ -57,6 +57,8 @@ Claude 和 Codex 的听写快捷键都是「长按 Ctrl+D」；实测用 `toggle
 | 上 / 下 | `helper: arrow up` / `helper: arrow down` |
 | 左 / 右 | `helper: session prev` / `helper: session next` |
 | 音量 + / − | `helper: scroll 240` / `helper: scroll -240`（必须保留上游的音量键长按连发） |
+| 上 / 下（补充） | Codex：焦点在**空的**输入框（ProseMirror，名称「和 Codex 一起工作」）时，「下」发 `remote-helper.json` 里的 `downWhenEmpty`（Codex 默认 `tab`，即采纳建议的下一句）；输入框有字时仍是方向键 |
+| 左 / 右（补充） | 非 Claude 应用：输入框里有未发送的文字时，左右是普通方向键（移动光标）；输入框为空时才切换会话 |
 | 主页 | `helper: new`：新建会话。Claude 发 Ctrl+N（它「新建」按钮的 AcceleratorKey），然后聚焦新输入框；Codex 没有公开快捷键，用 UIA 点名称为「新聊天」/ New chat 的按钮。`remote-helper.json` 里各应用的 `newSession` 可以覆盖 |
 
 AUMID 不要写死：启动时枚举 `shell:AppsFolder`（或读取开始菜单应用列表），找名称为 Claude、AppID 形如 `Claude_*!Claude` 的项，以及 AppID 形如 `OpenAI.Codex_*!App` 的项（Codex 在开始菜单里叫 ChatGPT）。
