@@ -17,20 +17,23 @@ import os
 from pathlib import Path
 import socket
 import subprocess
+
+from process_utils import CREATE_NO_WINDOW, hidden_startupinfo
 import sys
 import threading
 import time
 import webbrowser
 
+from bridges.xiaomi.helper_actions import helper_command
 from bridges.audio_client import AudioRouterClient, AudioRouterError
 
 
 if os.name != "nt":
     raise SystemExit("Raw Input bridge currently supports Windows only.")
 
-RAW_INPUT_NAME = os.environ.get("REMOTE_BRIDGE_RAW_INPUT_NAME", "iPazzPort")
-RAW_INPUT_ID = os.environ.get("REMOTE_BRIDGE_RAW_INPUT_ID", "iPazzPortBridge")
-RAW_INPUT_OWNER = os.environ.get("REMOTE_BRIDGE_RAW_INPUT_OWNER", "t1")
+RAW_INPUT_NAME = os.environ.get("XIAOMI_REMOTE_AGENT_RAW_INPUT_NAME", "Xiaomi Remote Agent")
+RAW_INPUT_ID = os.environ.get("XIAOMI_REMOTE_AGENT_RAW_INPUT_ID", "XiaomiRemoteAgentRawInput")
+RAW_INPUT_OWNER = os.environ.get("XIAOMI_REMOTE_AGENT_RAW_INPUT_OWNER", "xiaomi")
 
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -42,8 +45,8 @@ ULONG_PTR = wintypes.WPARAM
 WM_INPUT = 0x00FF
 WM_DESTROY = 0x0002
 WM_CLOSE = 0x0010
-DEFAULT_T1_CONTROL_PORT = int(
-    os.environ.get("REMOTE_BRIDGE_T1_CONTROL_PORT", "30682")
+DEFAULT_CONTROL_PORT = int(
+    os.environ.get("XIAOMI_REMOTE_AGENT_RAW_CONTROL_PORT", "32682")
 )
 RIDI_DEVICENAME = 0x20000007
 RIDI_DEVICEINFO = 0x2000000B
@@ -663,7 +666,7 @@ def as_event_id_list(value) -> list[str]:
     return result
 
 
-class T1Bridge:
+class RawInputBridge:
     def __init__(
         self,
         config_path: Path,
@@ -672,7 +675,7 @@ class T1Bridge:
         verbose: bool,
         action_guard=None,
         action_handlers: dict | None = None,
-        control_port: int = DEFAULT_T1_CONTROL_PORT,
+        control_port: int = DEFAULT_CONTROL_PORT,
     ):
         self.config_path = config_path
         self.root = config_path.parent
@@ -704,26 +707,14 @@ class T1Bridge:
         self.voice_started_at: dict[str, int] = {}
         self.audio_release_monitors: set[str] = set()
         self.audio_state_lock = threading.RLock()
-        # The T1 USB microphone can take over five seconds to wake from a cold
-        # state. Keep the longer first wait T1-only; Hanvon and Xiaomi retain
-        # the shared client's existing two-second behavior.
-        if os.environ.get("REMOTE_BRIDGE_AUDIO_TRANSPORT", "").casefold() == "native":
-            # Keep the native-endpoint helper out of Xiaomi-only builds. The
-            # shared Raw Input mapper does not need it unless launched as T1.
-            from bridges.native_audio import NativeAudioSessionClient
-
-            self.audio_router = NativeAudioSessionClient(RAW_INPUT_OWNER)
-        else:
-            self.audio_router = AudioRouterClient(
-                RAW_INPUT_OWNER,
-                open_timeout=8.0,
-                open_retry_timeout=2.0,
-            )
+        self.audio_router = AudioRouterClient(
+            RAW_INPUT_OWNER, open_timeout=8.0, open_retry_timeout=2.0,
+        )
         self.control_port = int(control_port)
         self.control_socket: socket.socket | None = None
         self.control_stop = threading.Event()
         self.started_at = time.monotonic()
-        self.runtime_state_path = self.root / "t1_runtime_state.json"
+        self.runtime_state_path = self.root / "xiaomi_runtime_state.json"
         self._add_default_voice_audio_source()
         self._wndproc = WNDPROC(self.wndproc)
         self.hwnd = None
@@ -1376,10 +1367,12 @@ class T1Bridge:
             send_hotkey([action.get("key")])
         elif kind == "text":
             send_text(str(action.get("text", "")))
+        elif kind == "helper":
+            subprocess.Popen(helper_command(action), creationflags=CREATE_NO_WINDOW, startupinfo=hidden_startupinfo())
         elif kind == "command":
-            subprocess.Popen(action.get("args", []), cwd=action.get("cwd") or None)
+            subprocess.Popen(action.get("args", []), cwd=action.get("cwd") or None, creationflags=CREATE_NO_WINDOW, startupinfo=hidden_startupinfo())
         elif kind == "shell":
-            subprocess.Popen(str(action.get("command", "")), shell=True)
+            subprocess.Popen(str(action.get("command", "")), shell=True, creationflags=CREATE_NO_WINDOW, startupinfo=hidden_startupinfo())
         elif kind == "open_url":
             webbrowser.open(str(action.get("url", "")))
         elif kind == "set_mode":
@@ -1521,7 +1514,9 @@ def list_devices() -> None:
 
 
 def default_config_path() -> Path:
-    return Path(__file__).resolve().parent / "t1" / "config.json"
+    from bridges.xiaomi.xiaomi_config import KEYS_CONFIG_PATH
+
+    return KEYS_CONFIG_PATH
 
 
 def main(
@@ -1538,7 +1533,7 @@ def main(
     parser.add_argument(
         "--control-port",
         type=int,
-        default=DEFAULT_T1_CONTROL_PORT,
+        default=DEFAULT_CONTROL_PORT,
         help="local Raw Input status and graceful-shutdown UDP port",
     )
     args = parser.parse_args(argv)
@@ -1547,7 +1542,7 @@ def main(
         list_devices()
         return 0
 
-    bridge = T1Bridge(
+    bridge = RawInputBridge(
         Path(args.config).resolve(),
         args.learn,
         args.dry_run,

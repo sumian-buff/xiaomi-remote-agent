@@ -20,6 +20,8 @@ import signal
 import socket
 import struct
 import subprocess
+
+from process_utils import CREATE_NO_WINDOW, hidden_startupinfo
 import sys
 import threading
 import time
@@ -65,6 +67,7 @@ from .xiaomi_config import (
     save_keys_config,
     voice_hotkey_from_configs,
 )
+from .helper_actions import helper_command
 from .hid_report_tap import XiaomiHidReportTap
 from bridges.audio_client import PCM_PORT, ROUTER_HOST
 
@@ -72,7 +75,7 @@ from bridges.audio_client import PCM_PORT, ROUTER_HOST
 _MUTEX_HANDLE = None
 _RUNTIME_LOG = None
 XIAOMI_CONTROL_PORT = int(
-    os.environ.get("REMOTE_BRIDGE_XIAOMI_CONTROL_PORT", "28690")
+    os.environ.get("XIAOMI_REMOTE_AGENT_XIAOMI_CONTROL_PORT", "32690")
 )
 TV_EVENT_IDS = frozenset(BUTTON_ALIASES["tv"])
 HID_SERVICE_UUID = "00001812-0000-1000-8000-00805f9b34fb"
@@ -462,14 +465,15 @@ class XiaomiSpecialKeyHook:
                 )
                 return True
             with self.key_send_lock:
-                if action_type == "command":
-                    arguments = action.get("args", [])
+                if action_type in {"command", "helper"}:
+                    arguments = helper_command(action) if action_type == "helper" else action.get("args", [])
                     if not isinstance(arguments, list) or not arguments:
                         raise ValueError("command action requires a non-empty args list")
                     subprocess.Popen(
                         [str(argument) for argument in arguments],
                         cwd=action.get("cwd") or None,
-                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                        creationflags=CREATE_NO_WINDOW,
+                        startupinfo=hidden_startupinfo(),
                     )
                 else:
                     core = self._load_bridge_core()
@@ -1089,8 +1093,8 @@ def start_raw_mapping_thread(
                 [
                     "--config",
                     str(KEYS_CONFIG_PATH),
-                    # The standalone T1 worker owns 30682. The embedded Xiaomi
-                    # mapper only needs Raw Input, so bind its unused control
+                    # The embedded Xiaomi mapper only needs Raw Input.
+                    # Bind its unused control
                     # listener to an ephemeral port instead of disabling the
                     # whole mapping thread with WSAEADDRINUSE.
                     "--control-port",
@@ -1628,7 +1632,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default=str(config_path))
     parser.add_argument("--address", default=config.get("address", DEFAULT_ADDRESS))
-    parser.add_argument("--gain-db", type=float, default=float(config.get("gain_db", 10.0)))
+    parser.add_argument("--gain-db", type=float, default=float(config.get("gain_db", 4.0)))
     parser.add_argument(
         "--retry-delay", type=float, default=float(config.get("retry_delay", 3.0))
     )

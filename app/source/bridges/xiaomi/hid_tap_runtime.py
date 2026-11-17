@@ -11,6 +11,8 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+
+from process_utils import CREATE_NO_WINDOW, hidden_startupinfo
 import threading
 import winreg
 
@@ -20,13 +22,13 @@ GADGET_ARCHIVE_NAME = "frida-gadget-17.15.3-windows-x86_64.dll.xz"
 GADGET_ARCHIVE_SHA256 = (
     "b566d70189b6d551ad8f4e0bea24de08a3d4c0f559bb35b2bdb67d45182240c2"
 )
-GADGET_DLL_NAME = "RemoteBridgeHidTap.dll"
+GADGET_DLL_NAME = "XiaomiRemoteAgentHidTap.dll"
 GADGET_DLL_SHA256 = (
     "6fca4007b2284c765a6c15c967a741f536b5865bf83867326a54029a3b752748"
 )
-GADGET_CONFIG_NAME = "RemoteBridgeHidTap.config"
+GADGET_CONFIG_NAME = "XiaomiRemoteAgentHidTap.config"
 GADGET_SCRIPT_NAME = "xiaomi_hid_gadget.js"
-HID_TAP_PORT = int(os.environ.get("REMOTE_BRIDGE_XIAOMI_HID_TAP_PORT", "30684"))
+HID_TAP_PORT = int(os.environ.get("XIAOMI_REMOTE_AGENT_XIAOMI_HID_TAP_PORT", "32684"))
 
 BTHLE_ENUM_KEY = r"SYSTEM\CurrentControlSet\Enum\BTHLEDevice"
 HID_SERVICE_PREFIX = "{00001812-0000-1000-8000-00805f9b34fb}"
@@ -41,7 +43,7 @@ const HEARTBEAT_INTERVAL_MS = 5000;
 const RECONNECT_DELAY_MS = 1000;
 
 let host = "127.0.0.1";
-let port = 30684;
+let port = 32684;
 let connection = null;
 let output = null;
 let writeChain = Promise.resolve();
@@ -207,7 +209,7 @@ def secure_runtime_directory() -> Path:
     program_data = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData"))
     return (
         program_data
-        / os.environ.get("REMOTE_BRIDGE_XIAOMI_RUNTIME_ID", "MiVibeRemote")
+        / os.environ.get("XIAOMI_REMOTE_AGENT_XIAOMI_RUNTIME_ID", "XiaomiRemoteAgent")
         / "hid-tap"
         / f"{GADGET_VERSION}-x64-{GADGET_DLL_SHA256[:12]}"
     )
@@ -254,6 +256,8 @@ def _lock_runtime_acl(path: Path) -> None:
             encoding="utf-8",
             errors="replace",
             check=False,
+            creationflags=CREATE_NO_WINDOW,
+            startupinfo=hidden_startupinfo(),
         )
         if completed.returncode != 0:
             raise OSError(

@@ -1,25 +1,16 @@
 # 贡献指南
 
-感谢你改进遥控器中心。
+本项目仅维护小米蓝牙语音遥控器 2 / 2 Pro。保留上游已经验证的 ATVV、音频路由和按键拦截核心；每次修改限定范围，并说明测试结果与未执行的硬件验证。
 
-## 开始之前
+不要提交真实设备地址、用户日志、账号、密钥或第三方二进制。一个提交解决一个明确问题，保留上游归属与 GPL-3.0 许可证。
 
-1. 先搜索现有 Issue，避免重复提交。
-2. 一个 Pull Request 只解决一个明确问题。
-3. 不要提交真实设备地址、客户日志、账号、密钥、付款信息、本机绝对路径或第三方二进制。
-4. 不要添加收费授权、设备绑定、防破译构建或私有服务依赖。
-5. 涉及按键、麦克风或音频会话的修改，需要说明实际测试设备和验证结果。
-
-## 本地检查
+在 app 目录使用已准备好的虚拟环境，离线运行：
 
 ```powershell
-.\scripts\check-public-boundary.ps1
-python -m compileall -q source
-python -m unittest discover -s tests -p "test_*.py"
+.venv\Scripts\python.exe -m compileall -q source
+.venv\Scripts\python.exe -m ruff check source/standalone/xiaomi_main.py source/bridges/xiaomi --select F
+.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"
+.\delivery\build-standalone-packages.ps1
 ```
 
-构建安装器前还需安装 `requirements-dev.txt` 和 Inno Setup 6。构建脚本会按固定校验值获取第三方资源；请勿把下载的二进制提交到 Git。
-
-## 提交说明
-
-Pull Request 中请写清问题、改动、影响范围和验证方式。小米、T1、V60 三套桥接相互独立；修改一套设备时，确认没有把其他设备模块带进对应安装包。
+构建只使用本地依赖与已经校验的 Frida Gadget。缺少 Inno Setup 时正常跳过安装包，仍生成仓库根目录 dist\XiaomiRemoteAgent。测试不得连接遥控器、注入进程、改变默认麦克风或操作用户安装的 MiVibe；这些功能由人工按根 README 验收。

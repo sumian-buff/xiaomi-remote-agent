@@ -12,14 +12,18 @@ import threading
 
 
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / os.environ.get(
-    "REMOTE_BRIDGE_XIAOMI_APP_ID", "MiVibeRemote"
+    "XIAOMI_REMOTE_AGENT_XIAOMI_APP_ID", "XiaomiRemoteAgent"
 )
 CONFIG_PATH = APPDATA / "xiaomi.json"
 KEYS_CONFIG_PATH = APPDATA / "xiaomi_keys.json"
 
 APP_VERSION = "0.1.21"
-APP_VERSION = os.environ.get("REMOTE_BRIDGE_XIAOMI_VERSION", APP_VERSION)
+APP_VERSION = os.environ.get("XIAOMI_REMOTE_AGENT_XIAOMI_VERSION", APP_VERSION)
 MAPPING_SCHEMA_VERSION = 3
+
+AGENT_VOICE_HOTKEY = ("ctrl", "d")
+AGENT_VOICE_TRIGGER_MODE = "toggle"
+DEFAULT_GAIN_DB = 4.0
 
 CODEX_VOICE_HOTKEY = ("rightalt",)
 CODEX_VOICE_TRIGGER_MODE = "hold"
@@ -29,8 +33,8 @@ WECHAT_VOICE_HOTKEY = ("ctrl", "win")
 WECHAT_VOICE_TRIGGER_MODE = "hold"
 QIANWEN_VOICE_HOTKEY = ("rightctrl",)
 QIANWEN_VOICE_TRIGGER_MODE = "toggle"
-DEFAULT_VOICE_HOTKEY = CODEX_VOICE_HOTKEY
-PRESET_ORDER = ("codex", "workbuddy", "wechat", "qianwen")
+DEFAULT_VOICE_HOTKEY = AGENT_VOICE_HOTKEY
+PRESET_ORDER = ("agent", "codex", "workbuddy", "wechat", "qianwen")
 SIDED_MODIFIER_KEYS = frozenset(
     {
         "leftctrl",
@@ -199,42 +203,23 @@ DEFAULT_BUTTON_BINDINGS = {
     "tv": [{"type": "hotkey", "keys": ["alt", "esc"]}],
 }
 
-CODEX_START_COMMAND = (
-    "$app = Get-StartApps | Where-Object { $_.Name -in @('Codex', 'ChatGPT') } "
-    "| Select-Object -First 1; "
-    "if ($app) { Start-Process ('shell:AppsFolder\\' + $app.AppID) } "
-    "else { try { Start-Process 'codex:' -ErrorAction Stop } "
-    "catch { Start-Process 'codex.exe' } }"
-)
-
-WORKBUDDY_START_COMMAND = (
-    "$app = Get-StartApps | Where-Object { $_.Name -eq 'WorkBuddy' } "
-    "| Select-Object -First 1; "
-    "if ($app) { Start-Process ('shell:AppsFolder\\' + $app.AppID) } "
-    "else { try { Start-Process 'workbuddy:' -ErrorAction Stop } "
-    "catch { Start-Process 'WorkBuddy.exe' } }"
-)
-
-WECHAT_START_COMMAND = (
-    "$app = Get-StartApps | Where-Object { $_.Name -in @('微信', 'WeChat') } "
-    "| Select-Object -First 1; "
-    "if ($app) { Start-Process ('shell:AppsFolder\\' + $app.AppID) } "
-    "else { $paths = @("
-    "(Join-Path $env:ProgramFiles 'Tencent\\WeChat\\WeChat.exe'), "
-    "(Join-Path ${env:ProgramFiles(x86)} 'Tencent\\WeChat\\WeChat.exe'), "
-    "(Join-Path $env:LOCALAPPDATA 'Tencent\\WeChat\\WeChat.exe')"
-    ") | Where-Object { $_ -and (Test-Path $_) }; "
-    "$exe = $paths | Select-Object -First 1; "
-    "if ($exe) { Start-Process $exe } else { Start-Process 'WeChat.exe' } }"
-)
-
-QIANWEN_START_COMMAND = (
-    "$app = Get-StartApps | Where-Object { $_.Name -in @('千问办公', 'QwenWork') } "
-    "| Select-Object -First 1; "
-    "if ($app) { Start-Process ('shell:AppsFolder\\' + $app.AppID) } "
-    "else { try { Start-Process 'qwenwork:' -ErrorAction Stop } "
-    "catch { Start-Process 'QwenWork.exe' } }"
-)
+def agent_button_bindings() -> dict:
+    """Factory mappings for Claude and Codex; app aliases resolve at runtime."""
+    return {
+        "power": [{"type": "hotkey", "keys": ["esc"]}],
+        "mic": [{"type": "hotkey", "keys": list(AGENT_VOICE_HOTKEY)}],
+        "up": [{"type": "helper", "args": ["arrow", "up"]}],
+        "left": [{"type": "helper", "args": ["session", "prev"]}],
+        "ok": [{"type": "helper", "args": ["ok"]}],
+        "right": [{"type": "helper", "args": ["session", "next"]}],
+        "down": [{"type": "helper", "args": ["arrow", "down"]}],
+        "back": [{"type": "hotkey", "keys": ["backspace"], "hold_ms": 20}],
+        "volume_up": [{"type": "helper", "args": ["scroll", "240"]}],
+        "home": [{"type": "hotkey", "keys": ["leftwin", "d"]}],
+        "volume_down": [{"type": "helper", "args": ["scroll", "-240"]}],
+        "menu": [{"type": "helper", "args": ["activate", "claude"]}],
+        "tv": [{"type": "helper", "args": ["activate", "codex"]}],
+    }
 
 
 def codex_button_bindings() -> dict:
@@ -244,16 +229,8 @@ def codex_button_bindings() -> dict:
     ]
     bindings["power"] = [
         {
-            "type": "command",
-            "args": [
-                "powershell.exe",
-                "-NoProfile",
-                "-NonInteractive",
-                "-WindowStyle",
-                "Hidden",
-                "-Command",
-                CODEX_START_COMMAND,
-            ],
+            "type": "helper",
+            "args": ["activate", "codex"],
             "label": "打开 Codex",
         }
     ]
@@ -268,16 +245,8 @@ def workbuddy_button_bindings() -> dict:
     ]
     bindings["power"] = [
         {
-            "type": "command",
-            "args": [
-                "powershell.exe",
-                "-NoProfile",
-                "-NonInteractive",
-                "-WindowStyle",
-                "Hidden",
-                "-Command",
-                WORKBUDDY_START_COMMAND,
-            ],
+            "type": "helper",
+            "args": ["activate", "workbuddy"],
             "label": "打开 WorkBuddy",
         }
     ]
@@ -292,16 +261,8 @@ def wechat_button_bindings() -> dict:
     ]
     bindings["power"] = [
         {
-            "type": "command",
-            "args": [
-                "powershell.exe",
-                "-NoProfile",
-                "-NonInteractive",
-                "-WindowStyle",
-                "Hidden",
-                "-Command",
-                WECHAT_START_COMMAND,
-            ],
+            "type": "helper",
+            "args": ["activate", "wechat"],
             "label": "打开微信",
         }
     ]
@@ -316,16 +277,8 @@ def qianwen_button_bindings() -> dict:
     ]
     bindings["power"] = [
         {
-            "type": "command",
-            "args": [
-                "powershell.exe",
-                "-NoProfile",
-                "-NonInteractive",
-                "-WindowStyle",
-                "Hidden",
-                "-Command",
-                QIANWEN_START_COMMAND,
-            ],
+            "type": "helper",
+            "args": ["activate", "qianwen"],
             "label": "打开千问办公",
         }
     ]
@@ -334,13 +287,15 @@ def qianwen_button_bindings() -> dict:
 
 
 def preset_button_bindings(preset: str) -> dict:
+    if preset == "codex":
+        return codex_button_bindings()
     if preset == "workbuddy":
         return workbuddy_button_bindings()
     if preset == "wechat":
         return wechat_button_bindings()
     if preset == "qianwen":
         return qianwen_button_bindings()
-    return codex_button_bindings()
+    return agent_button_bindings()
 
 
 def custom_preset_definitions(keys_config: dict) -> dict:
@@ -424,6 +379,7 @@ def apply_preset_configuration(
     bindings = saved_preset_button_bindings(keys_config, preset)
     bindings.update(cycle_bindings)
     voice_profiles = {
+        "agent": (AGENT_VOICE_HOTKEY, AGENT_VOICE_TRIGGER_MODE),
         "codex": (CODEX_VOICE_HOTKEY, CODEX_VOICE_TRIGGER_MODE),
         "workbuddy": (WORKBUDDY_VOICE_HOTKEY, WORKBUDDY_VOICE_TRIGGER_MODE),
         "wechat": (WECHAT_VOICE_HOTKEY, WECHAT_VOICE_TRIGGER_MODE),
@@ -467,12 +423,12 @@ def default_config() -> dict:
     return {
         "version": APP_VERSION,
         "address": DEFAULT_ADDRESS,
-        "gain_db": 10.0,
+        "gain_db": DEFAULT_GAIN_DB,
         "retry_delay": 3.0,
         "voice_shortcut_enabled": True,
         "voice_hotkey": "+".join(DEFAULT_VOICE_HOTKEY),
-        "voice_trigger_mode": CODEX_VOICE_TRIGGER_MODE,
-        "active_preset": "codex",
+        "voice_trigger_mode": AGENT_VOICE_TRIGGER_MODE,
+        "active_preset": "agent",
         "raw_mapping_enabled": True,
         "tv_action_ready_delay": 2.0,
         "special_key_hook_enabled": True,
@@ -500,7 +456,7 @@ def default_keys_config() -> dict:
         "handle_key_up": False,
         "handle_mouse_move": False,
         "button_aliases": copy.deepcopy(BUTTON_ALIASES),
-        "button_bindings": codex_button_bindings(),
+        "button_bindings": agent_button_bindings(),
         "preset_bindings": {
             preset: preset_button_bindings(preset) for preset in PRESET_ORDER
         },
@@ -686,10 +642,10 @@ def load_keys_config(path: Path = KEYS_CONFIG_PATH) -> dict:
     if loaded_schema < 2:
         # Schema 1 had only one global mapping. Treat it as the saved mapping
         # for the active preset; other profiles start from their own defaults.
-        active_preset = "codex"
+        active_preset = PRESET_ORDER[0]
         try:
             sibling_config = load_config(path.with_name(CONFIG_PATH.name))
-            configured = str(sibling_config.get("active_preset", "codex"))
+            configured = str(sibling_config.get("active_preset", PRESET_ORDER[0]))
             if configured in PRESET_ORDER:
                 active_preset = configured
         except (OSError, ValueError, json.JSONDecodeError):

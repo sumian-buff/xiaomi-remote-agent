@@ -20,3 +20,7 @@ source/bridges/xiaomi/assets/*.png
 source/bridges/xiaomi/assets/*.xz
 delivery/vendor/
 delivery/out/
+
+helper/*.exe
+helper/remote-helper.json
+helper/remote-helper.log

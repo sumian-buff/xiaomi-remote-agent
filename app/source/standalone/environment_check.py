@@ -1,4 +1,4 @@
-"""Actionable Windows environment checks for MiVibe Remote.
+"""Actionable Windows environment checks for Xiaomi Remote Agent.
 
 The checker intentionally does not change system state.  It reports what is
 missing and leaves repair actions to the main application so users can inspect
@@ -130,7 +130,7 @@ def evaluate_environment(
         title="修复工具",
         status="pass" if script_ready else "fail",
         detail="官方驱动检查脚本完整" if script_ready else "安装目录缺少修复脚本",
-        action="重新安装完整的 MiVibe Remote 安装包。" if not script_ready else "",
+        action="重新安装完整的 Xiaomi Remote Agent 安装包。" if not script_ready else "",
     ))
 
     bridge_log = _read_recent_log(log_dir / "bridge.log")
@@ -207,12 +207,16 @@ class EnvironmentCheckWindow:
         on_repair: Callable[[], None],
         on_restart: Callable[[], None],
         on_open_logs: Callable[[], None],
+        on_set_microphone: Callable[[], None] | None = None,
+        on_restore_microphone: Callable[[], None] | None = None,
     ) -> None:
         self.parent = parent
         self.check_provider = check_provider
         self.on_repair = on_repair
         self.on_restart = on_restart
         self.on_open_logs = on_open_logs
+        self.on_set_microphone = on_set_microphone
+        self.on_restore_microphone = on_restore_microphone
         self.window: tk.Toplevel | None = None
         self.results_frame: tk.Frame | None = None
         self.summary_var = tk.StringVar(value="正在检查…")
@@ -230,7 +234,7 @@ class EnvironmentCheckWindow:
     def _build(self) -> None:
         window = tk.Toplevel(self.parent)
         self.window = window
-        window.title("MiVibe 环境检查")
+        window.title("Xiaomi Remote Agent 环境检查")
         window.geometry("760x690")
         window.minsize(680, 560)
         window.configure(bg="#eef2f7")
@@ -276,6 +280,16 @@ class EnvironmentCheckWindow:
             cursor="hand2",
         )
         self.refresh_button.pack(side="right")
+
+        microphone_actions = tk.Frame(window, bg="#eef2f7", padx=18, pady=8)
+        microphone_actions.pack(fill="x")
+        for label, command in (
+            ("把默认录音设备设为 CABLE Output", self.on_set_microphone),
+            ("恢复原录音设备", self.on_restore_microphone),
+        ):
+            if command is not None:
+                tk.Button(microphone_actions, text=label, command=command,
+                          padx=12, pady=8, relief="flat", bg="white").pack(side="left", padx=(0, 8))
 
         canvas = tk.Canvas(window, bg="#eef2f7", highlightthickness=0)
         scrollbar = tk.Scrollbar(window, orient="vertical", command=canvas.yview)

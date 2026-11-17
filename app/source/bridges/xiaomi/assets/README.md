@@ -1,5 +1,3 @@
-# MiVibe Remote 图像资源
+# 小米蓝牙资源
 
-`MiVibeRemote.ico` 是 Windows 应用和安装程序图标，由 MiVibe Remote 项目维护者提供并授权用于本项目。
-
-不要把来源不明的电商图片或第三方上游专有品牌资产提交到 Pull Request。
+本目录保存经过 SHA-256 校验的 Frida Gadget 压缩包。应用图标位于 source/assets/app.ico，由 scripts/generate-icon.py 生成。

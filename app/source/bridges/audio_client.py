@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Small UDP client shared by the T1 and Hanvon bridge roles."""
+"""Small UDP client used by the Xiaomi voice and mapping roles."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ import uuid
 
 
 ROUTER_HOST = "127.0.0.1"
-PCM_PORT = int(os.environ.get("REMOTE_BRIDGE_PCM_PORT", "30680"))
-CONTROL_PORT = int(os.environ.get("REMOTE_BRIDGE_AUDIO_CONTROL_PORT", "30681"))
+PCM_PORT = int(os.environ.get("XIAOMI_REMOTE_AGENT_PCM_PORT", "32680"))
+CONTROL_PORT = int(os.environ.get("XIAOMI_REMOTE_AGENT_AUDIO_CONTROL_PORT", "32681"))
 
 
 class AudioRouterError(RuntimeError):

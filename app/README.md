@@ -1,68 +1,41 @@
-# MiVibe Remote for Windows
+# Xiaomi Remote Agent：开发与离线构建
 
-本目录基于 `xxb26553663-star/remote-bridge-hub v1.0.0` 的 Xiaomi
-独立应用，保留其 WinRT GATT、ATVV、Windows 输入注入、VB-CABLE、托盘程序和安装器。
+用户安装、按键与人工验收见 [仓库根 README](../README.md)。本目录只构建小米蓝牙语音遥控器 2 / 2 Pro 的独立 Windows 程序，运行不依赖 MiVibe Remote。
 
-MiVibe Remote 的增量：
+基于 MiVibe Remote（wyuzhi/MiVibe-Remote）修改，上游提交 `34d5244`，保留原作者与贡献者版权，采用 [GPL-3.0](LICENSE)。架构见 [ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
-- 独立产品名称和原创 `.ico` 图标；
-- 新增“Codex 预设”“WorkBuddy 预设”“微信预设”和“千问办公预设”：
-  - 电源键：从 Windows 开始菜单查找并打开当前预设应用；
-  - 确定键：Enter / 发送；
-  - 方向键：导航；
-  - 返回键：退格；
-  - 菜单键：Escape；
-  - Codex 语音键：默认按住右 Alt；
-  - WorkBuddy 语音键：语音开始和结束时分别点按一次 `Ctrl+D`；
-  - 千问办公语音键：语音开始和结束时分别点按一次右 `Ctrl`；
-  - 可在内置预设旁新增并命名本地自定义预设，保存整套按键与语音设置；
-  - 语音快捷键仍可继续自定义；
-- Xiaomi 动作执行器复用上游已有的 `command` 动作能力；
-- 普通按键支持单击自定义，返回键和音量键保留上游长按重复；
-- 使用 WinSparkle 每 24 小时自动检查一次已签名更新，主窗口和托盘也可手动“检查更新”；
-- 主窗口和托盘提供“关于 MiVibe Remote”，可查看作者联系方式、复制微信号并检查更新；
-- 主窗口改为状态控制台，新增只读环境检查：分别检查配置、VB-CABLE 两个端点、后台桥接、修复脚本和遥控器识别，并给出对应修复动作；
-- 新增应用内使用教程，覆盖首次安装、预设、触发方式和真实文本框测试；
-- 安装路径和开始菜单分组不再使用上游商业品牌。
+## 本地前提
 
-## 构建要求
+- 64 位 Windows，依赖已安装到本目录 `.venv`；当前本地解释器是 Python 3.11.9。
+- 所有 Python 命令使用 `.venv\Scripts\python.exe`；依赖版本见 `requirements.txt` 和 `requirements-dev.txt`。构建不安装包、不下载依赖。
+- 系统 .NET Framework 64 位编译器 `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe` 及 WPF 引用程序集。
+- 人工准备的 Frida Gadget 17.15.3 位于 `source/bridges/xiaomi/assets/frida-gadget-17.15.3-windows-x86_64.dll.xz`，构建校验 SHA-256；许可文本位于 `licenses/frida-COPYING.txt`。
+- Inno Setup / ISCC 可选，找不到时保留文件夹产物并跳过安装包。
 
-- 64 位 Windows 10 1809 或更高版本；
-- Python 3.12；
-- Inno Setup 6；
-- `requirements.txt` 与 `requirements-dev.txt` 中的依赖。
+## 检查与构建
+
+在 `app/` 目录依次运行：
 
 ```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt -r requirements-dev.txt
-python -m unittest discover -s tests -v
-$env:MIVIBE_APPCAST_URL = "https://updates.example.com/windows-appcast.xml"
-$env:MIVIBE_UPDATE_ED25519_PUBLIC_KEY = "<base64-encoded-32-byte-public-key>"
-.\delivery\build-standalone-packages.ps1 -Version 0.1.21 -Product xiaomi -AllowUnsignedCandidate
+.\.venv\Scripts\python.exe -m compileall -q source
+.\.venv\Scripts\python.exe -m ruff check source/standalone/xiaomi_main.py source/bridges/xiaomi --select F
+.\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"
+.\delivery\build-standalone-packages.ps1
 ```
 
-默认只构建 MiVibe Remote；生成的可执行文件和安装器分别为
-`MiVibeRemote.exe` 与 `MiVibeRemoteSetup-0.1.21.exe`。`-Product` 参数仍可显式选择
-保留的其他上游独立产品，但它们不属于 MiVibe Remote 交付物。
-构建同时生成对应的 `.exe.sha256` 校验文件。
+产物位于**仓库根目录** `dist\XiaomiRemoteAgent\`。主程序、`remote-helper.exe`、`_internal`、Frida Gadget、GPL 和第三方许可证一起交付。不要启动产物来代替静态检查；真实遥控器连接和系统录音设备变更由人验收。
 
-两个更新变量必须同时提供。构建脚本只会把 HTTPS appcast 地址和公开 Ed25519
-验签公钥写入生成资源；若两者均未提供，安装包仍能构建和运行，但在线更新会安全禁用。
-任何更新签名私钥、GitHub Token 或会员凭证都不得传给此构建脚本或写入安装包。
+构建脚本用 Pillow 生成 `source/assets/app.ico`，使用 `source/XiaomiRemoteAgent.spec` 打包无控制台主程序，再用系统 csc 的 `/target:winexe` 编译 `helper/remote-helper.cs`。PyInstaller 缓存放在工作区 `app/build/`。没有签名的本地产物可供人工验收；本项目不包含在线自动更新。
 
-Windows appcast 的安装包 enclosure 应标记 `sparkle:os="windows-x64"`，携带
-`sparkle:edSignature`，并使用以下安装参数：
+单元测试使用临时目录与 mock 验证配置、动态 AppID、helper 参数与动作调度、隐藏子进程、录音设备备份/恢复及错误处理。这些结果不代表蓝牙、音质、桌面 UI 自动化已经通过实机验收。
 
-```text
-/SILENT /SP- /NOICONS /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS /UPDATED
-```
+## 维护边界
 
-`/UPDATED` 让固定 AppId 的 Inno Setup 执行原位覆盖升级、保留用户此前选择的任务，
-跳过首次安装的 VB-CABLE 检查，并在更新完成后重新启动 MiVibe Remote。签名私钥只在
-隔离的发布环境中用于签署最终安装包；客户端只持有公钥。
+- 保留 ATVV、音频路由、Raw Input 与 HID 报告兼容层，不重写已验证的协议路径。
+- 所有受管 Python 子进程使用 `CREATE_NO_WINDOW` 和隐藏 `STARTUPINFO`；提权注入器使用 `SW_HIDE`。helper 动作直接传参数数组给随程序发布的 exe，不使用 PowerShell。
+- 配置与主日志位于 `%APPDATA%\XiaomiRemoteAgent`，Gadget 受保护运行目录位于 `%PROGRAMDATA%\XiaomiRemoteAgent\hid-tap`。
+- 不操作已安装 MiVibe 的目录和配置，冲突检查只读取进程名。
+- `helper/audio-default-reference.ps1` 仅作为原始实现参考；默认录音设备功能使用 Python ctypes，不执行该脚本。
+- 本轮仅做离线检查和构建；按键、10 次连续语音、长按、重连、黑框和录音角色恢复须按根 README 人工验收。
 
-构建会校验并获取 Frida Gadget 和固定版本 WinSparkle。VB-CABLE 不嵌入安装包；用户从 MiVibe 主窗口主动
-打开语音驱动助手后，助手从 VB-Audio 官方地址下载、校验并启动官方安装程序。
-上游说明见 [UPSTREAM_README.md](UPSTREAM_README.md)，来源与许可证见仓库根目录
-`UPSTREAM.md`、本目录 `THIRD_PARTY_NOTICES.md` 和 `LICENSE`。
+上游项目：<https://github.com/wyuzhi/MiVibe-Remote>；本项目：<https://github.com/sumian-buff/xiaomi-remote-agent>。第三方许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

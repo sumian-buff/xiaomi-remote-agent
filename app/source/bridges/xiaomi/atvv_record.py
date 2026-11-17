@@ -392,7 +392,7 @@ def main() -> int:
         help="已在 Windows 中配对的小米遥控器蓝牙地址，例如 AA:BB:CC:DD:EE:FF",
     )
     parser.add_argument("--duration", type=float, default=45.0)
-    parser.add_argument("--gain-db", type=float, default=10.0)
+    parser.add_argument("--gain-db", type=float, default=4.0)
     parser.add_argument("--auto-open", action="store_true")
     parser.add_argument(
         "--output", type=Path, default=root / "logs" / f"mi_rc_voice_{timestamp}.wav"

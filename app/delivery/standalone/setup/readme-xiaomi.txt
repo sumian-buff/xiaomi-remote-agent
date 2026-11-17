@@ -1,23 +1,37 @@
-MiVibe Remote v0.1.21
+Xiaomi Remote Agent 0.1.21
 
-把小米蓝牙遥控器 2 变成 Windows 上的 Vibe Coding 控制器。
+用途
+把小米蓝牙语音遥控器 2 / 2 Pro 用于 Claude / Codex 桌面版。无需安装 MiVibe Remote；已安装 MiVibe 时请先从托盘退出，两者不能同时连接遥控器。
+本程序不包含输入法或语音识别功能，听写由 Claude / Codex 提供；VB-CABLE 需单独安装。
 
-包含：13 个正面按键映射、长按连续动作、蓝牙语音桥接、设置界面和开机启动。
-不包含：任何输入法、语音识别服务、T1 或 V60 程序。
+首次使用
+1. 准备 Windows 蓝牙、已配对的遥控器、VB-CABLE 和 Claude / Codex。
+2. 从资源管理器或本程序的开始菜单快捷方式启动 XiaomiRemoteAgent.exe。不要从 Claude 内置终端或 WMI 启动正式程序，以免 APPDATA 被重定向。
+3. “按键与语音设置”选 Claude + Codex：Ctrl+D、开关型、增益 4 dB。
+4. Codex 语音切换快捷键设为 Ctrl+D，麦克风选 CABLE Output；上一/下一侧边栏项目绑定 Ctrl+Shift+F1 / F2。
+5. Claude 使用 Ctrl+D 听写。在“环境检查”点击“把默认录音设备设为 CABLE Output”。只更改普通和多媒体角色（eConsole=0、eMultimedia=1），不更改通信角色（eCommunications=2）。需要时点击“恢复原录音设备”。退出程序不自动恢复。
+6. 首次完整返回键接管可能要求一次管理员确认：Frida Gadget 兼容层读取返回键 HID 报告。此确认与普通控制台黑框不同。
 
-在线更新：程序启动后按每天一次的周期静默检查已签名的新版本；只有发现新版时才提示。也可以在主窗口或托盘点击“检查更新”。下载完成后会校验 Ed25519 签名，再原位覆盖升级并重新打开程序。在线更新不会重复运行 VB-CABLE 驱动安装流程。
+默认按键
+麦克风：按住听写，松开结束；连续测试 10 次且没有削波破音。
+菜单：切到 Claude 并聚焦输入框。
+TV：切到 Codex 主窗口，跳过透明工具浮层。
+电源：Esc，中断 agent。
+OK：发送；Claude 选项卡片选中并提交，“其他”输入框也能提交，提交后回到输入框。
+上/下：先进入 Claude 选项卡片，再移动选项；无卡片时为普通方向键。
+左/右：Claude 输入为空时点回复末尾第一个/第二个建议；Codex 切上一个/下一个会话。
+音量+/-：滚动对话，必要时自动移动鼠标；按住连滚，松开停止。
+返回：退格，按住连删。主页：Win+D 显示桌面。
 
-小米遥控器传来的是蓝牙压缩语音，不是 Windows 原生麦克风，因此语音必须使用 VB-CABLE。MiVibe 不再自行模拟安装驱动：请在主窗口点击“安装/修复语音驱动”，程序会从 VB-Audio 官方地址下载固定版本、校验 SHA-256 与官方签名，然后打开官方 VBCABLE_Setup_x64.exe。请在官方窗口点击 Install，并重启 Windows。普通按键和设置页面不依赖语音驱动，VB-CABLE 尚未安装时也应保持可用。
+启动时枚举 shell:AppsFolder 并通过当前 AppID 激活 Claude/Codex，不通过它们的 .lnk 快捷方式。应用更新后如识别异常，重启 Xiaomi Remote Agent。
 
-VB-CABLE 由 VB-Audio（https://vb-audio.com/Cable/）提供，采用 Donationware（捐赠软件）模式。VB-CABLE 不是本项目创作的软件，其权利、使用许可和服务由 VB-Audio 负责；专业、批量、集成或再分发使用请按 VB-Audio 当前许可另行确认。
+文件夹版请保留全部文件，放在用户可写的固定位置。remote-helper.exe 首次运行会在同目录生成 remote-helper.json；可备份后调整滚动区域和会话快捷键。配置、主日志与原录音设备备份位于 %APPDATA%\XiaomiRemoteAgent；helper 错误日志位于程序目录。
 
-首次使用前，请先在 Windows 蓝牙设置里配对遥控器。RC001、MI RC 以及带有 Google ATVV 语音服务的兼容小米蓝牙遥控器会自动发现；只有经过验证的 RC003 硬件才启用可选的高级 HID 兼容层。
+文件夹版开机启动：创建 XiaomiRemoteAgent.exe 的快捷方式，目标末尾加 --minimized，起始位置设为程序目录，放入 Win+R -> shell:startup 打开的文件夹。本程序自身使用快捷方式不影响 Claude/Codex 的 AppID 激活方式。彻底退出使用托盘“退出”。
 
-推荐设置：
-1. 打开“按键与语音设置”。
-2. 全新安装默认启用“Codex 预设”；可切换“WorkBuddy 预设”或“微信预设”，再点击“保存并应用”。微信语音键会按住 Ctrl+Win，松开后转成文字。
-3. 电源键会打开当前预设应用，确定键发送，方向键导航，返回键退格，菜单键为 Escape。
-4. Codex 预设把语音键设为“按住型”右 Alt；请在 Codex 中把“按住即可听写”的全局快捷键设为右 Alt，并把麦克风输入选择为 `CABLE Output`。
-5. WorkBuddy 预设把语音键设为“开关型”Ctrl+D；若 WorkBuddy 没有单独的麦克风选择项，请在 Windows 声音设置中把输入设备切换为 `CABLE Output`。
+本轮仅做离线检查和构建，没有连接遥控器或改动真实录音设备。请按根 README 完成按键、焦点、长按、10 次语音、启动无黑框、休眠唤醒重连，以及普通/多媒体设备恢复与通信设备不变的人工验证。
 
-MiVibe 不会主动修改 Windows 的系统默认麦克风或麦克风隐私权限；官方驱动安装期间如果 Windows 自动切换默认设备，助手会尝试恢复安装前的麦克风。`CABLE Output` 只需在 Codex 中单独选择。
+许可证与致谢
+基于 MiVibe Remote（wyuzhi/MiVibe-Remote）修改，上游提交 34d5244。保留上游作者及贡献者版权；本程序和 remote-helper 采用 GNU GPL-3.0，无任何担保。完整许可证见 LICENSE，第三方条款见 licenses 及 THIRD_PARTY_NOTICES.md。
+上游：https://github.com/wyuzhi/MiVibe-Remote
+本项目：https://github.com/sumian-buff/xiaomi-remote-agent

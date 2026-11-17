@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import socket
 import subprocess
+
 import sys
 import threading
 import time
@@ -18,37 +19,44 @@ from tkinter import messagebox
 import traceback
 
 
-APP_NAME = "MiVibe Remote"
+if not getattr(sys, "frozen", False):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from process_utils import CREATE_NO_WINDOW, hidden_startupinfo
+
+
+APP_NAME = "Xiaomi Remote Agent"
 APP_VERSION = "0.1.21"
-APP_ID = "MiVibeRemote"
-CONTROL_PORT = 31690
+APP_ID = "XiaomiRemoteAgent"
+CONTROL_PORT = 32690
 
 # These must be set before importing any Xiaomi or audio bridge module.
-os.environ.setdefault("REMOTE_BRIDGE_XIAOMI_APP_ID", APP_ID)
-os.environ.setdefault("REMOTE_BRIDGE_XIAOMI_RUNTIME_ID", APP_ID)
-os.environ.setdefault("REMOTE_BRIDGE_XIAOMI_VERSION", APP_VERSION)
-os.environ.setdefault("REMOTE_BRIDGE_PCM_PORT", "31680")
-os.environ.setdefault("REMOTE_BRIDGE_AUDIO_CONTROL_PORT", "31681")
-os.environ.setdefault("REMOTE_BRIDGE_XIAOMI_HID_TAP_PORT", "31684")
-os.environ.setdefault("REMOTE_BRIDGE_XIAOMI_CONTROL_PORT", str(CONTROL_PORT))
-os.environ.setdefault("REMOTE_BRIDGE_RAW_INPUT_NAME", "Xiaomi Remote")
-os.environ.setdefault("REMOTE_BRIDGE_RAW_INPUT_ID", "XiaomiRemoteRawInput")
-os.environ.setdefault("REMOTE_BRIDGE_RAW_INPUT_OWNER", "xiaomi-mapping")
+os.environ.setdefault("XIAOMI_REMOTE_AGENT_XIAOMI_APP_ID", APP_ID)
+os.environ.setdefault("XIAOMI_REMOTE_AGENT_XIAOMI_RUNTIME_ID", APP_ID)
+os.environ.setdefault("XIAOMI_REMOTE_AGENT_XIAOMI_VERSION", APP_VERSION)
+os.environ.setdefault("XIAOMI_REMOTE_AGENT_PCM_PORT", "32680")
+os.environ.setdefault("XIAOMI_REMOTE_AGENT_AUDIO_CONTROL_PORT", "32681")
+os.environ.setdefault("XIAOMI_REMOTE_AGENT_XIAOMI_HID_TAP_PORT", "32684")
+os.environ.setdefault("XIAOMI_REMOTE_AGENT_XIAOMI_CONTROL_PORT", str(CONTROL_PORT))
+os.environ.setdefault("XIAOMI_REMOTE_AGENT_RAW_INPUT_NAME", "Xiaomi Remote")
+os.environ.setdefault("XIAOMI_REMOTE_AGENT_RAW_INPUT_ID", "XiaomiRemoteAgentRawInput")
+os.environ.setdefault("XIAOMI_REMOTE_AGENT_RAW_INPUT_OWNER", "xiaomi-mapping")
 
 from PIL import Image, ImageDraw
 import pystray
+import psutil
 
 from runtime_launcher import role_command
+from bridges.xiaomi.app_catalog import refresh_app_ids
 from bridges.xiaomi.xiaomi_config import APPDATA, CONFIG_PATH, load_config
 from standalone.about_info import AUTHOR_LINE
 from standalone.about_window import AboutWindow
-from standalone.environment_check import EnvironmentCheckWindow, run_environment_check
-from standalone.windows_update import MainThreadShutdownBridge, WinSparkleUpdater
+from standalone.environment_check import EnvironmentCheckItem, EnvironmentCheckWindow, run_environment_check
+from standalone.default_microphone import DefaultMicrophone
 
 
 LOG_DIR = APPDATA / "logs"
 HOST_LOG = LOG_DIR / "host.log"
-CREATE_NO_WINDOW = 0x08000000
 
 
 def log(message: str) -> None:
@@ -96,7 +104,8 @@ class XiaomiWorkers:
             stdout=stream,
             stderr=subprocess.STDOUT,
             env=child_environment,
-            creationflags=CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=CREATE_NO_WINDOW,
+            startupinfo=hidden_startupinfo(),
         )
 
     @staticmethod
@@ -127,7 +136,7 @@ class XiaomiWorkers:
             try:
                 with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
                     client.settimeout(0.25)
-                    client.sendto(payload, ("127.0.0.1", 31681))
+                    client.sendto(payload, ("127.0.0.1", 32681))
                     response, _ = client.recvfrom(4096)
                 result = json.loads(response.decode("utf-8"))
                 if result.get("ok") and result.get("request_id") == request_id:
@@ -203,34 +212,28 @@ class XiaomiApp:
         self.workers = XiaomiWorkers()
         self.settings_processes: list[subprocess.Popen] = []
         self.stop_event = threading.Event()
-        self._main_thread_id = threading.get_ident()
-        self._update_shutdown = MainThreadShutdownBridge(log)
         self._exiting = False
         self.control_socket: socket.socket | None = None
         self.tray: pystray.Icon | None = None
         self.guide_window: tk.Toplevel | None = None
         self.status_var = tk.StringVar(value="正在启动")
         self.detail_var = tk.StringVar(value="")
-        self.updater = WinSparkleUpdater(
-            APP_NAME,
-            APP_VERSION,
-            log,
-            self._request_update_shutdown,
-            self._can_install_update,
-        )
         self.about = AboutWindow(
             self.root,
             APP_NAME,
             APP_VERSION,
-            self.check_updates,
             log,
         )
+        self.default_microphone = DefaultMicrophone(APPDATA / "default-microphone.json")
+        self._microphone_busy = False
         self.environment_check = EnvironmentCheckWindow(
             self.root,
             check_provider=self._collect_environment_check,
             on_repair=self.repair_audio,
             on_restart=self.restart_workers,
             on_open_logs=self.open_logs,
+            on_set_microphone=lambda: self.change_default_microphone(restore=False),
+            on_restore_microphone=lambda: self.change_default_microphone(restore=True),
         )
         self._build_ui()
         self._start_tray()
@@ -243,7 +246,6 @@ class XiaomiApp:
             self.detail_var.set("点击“打开日志”查看原因；窗口会保留，不会静默退出。")
         if minimized:
             self.root.withdraw()
-        self.root.after(1500, self._start_updater)
         self.root.after(800, self._poll)
 
     def _build_ui(self) -> None:
@@ -386,7 +388,6 @@ class XiaomiApp:
             ("重启桥接", self.restart_workers),
             ("安装/修复语音驱动", self.repair_audio),
             ("使用教程", self.show_guide),
-            ("检查更新", self.check_updates),
             ("打开日志", self.open_logs),
         ):
             tk.Button(
@@ -406,7 +407,7 @@ class XiaomiApp:
         footer.pack(fill="x", pady=(14, 0))
         tk.Label(
             footer,
-            text="MiVibe 不包含输入法或语音识别；遥控器声音通过 VB-CABLE 送给你选择的输入法。",
+            text="Xiaomi Remote Agent 不包含输入法或语音识别；遥控器声音通过 VB-CABLE 送给你选择的输入法。",
             bg=background,
             fg=muted,
             wraplength=650,
@@ -441,10 +442,9 @@ class XiaomiApp:
             pystray.MenuItem("按键与语音设置", lambda *_: self.root.after(0, self.open_settings)),
             pystray.MenuItem("环境检查", lambda *_: self.root.after(0, self.show_environment_check)),
             pystray.MenuItem("使用教程", lambda *_: self.root.after(0, self.show_guide)),
-            pystray.MenuItem("检查更新", lambda *_: self.root.after(0, self.check_updates)),
             pystray.MenuItem("重启桥接", lambda *_: self.root.after(0, self.workers.restart_bridge)),
             pystray.MenuItem(
-                "关于 MiVibe Remote",
+                "关于 Xiaomi Remote Agent",
                 lambda *_: self.root.after(0, self.show_about),
             ),
             pystray.MenuItem("退出", lambda *_: self.root.after(0, self.exit)),
@@ -540,17 +540,57 @@ class XiaomiApp:
         process = subprocess.Popen(
             role_command("xiaomi-settings", ["--hub-port", str(CONTROL_PORT)]),
             cwd=str(Path(sys.executable).resolve().parent),
-            creationflags=CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=CREATE_NO_WINDOW,
+            startupinfo=hidden_startupinfo(),
         )
         self.settings_processes.append(process)
 
     def _collect_environment_check(self):
-        return run_environment_check(
+        results = run_environment_check(
             app_dir=Path(sys.executable).resolve().parent,
             config_path=CONFIG_PATH,
             log_dir=LOG_DIR,
             worker_status=self.workers.status(),
         )
+        try:
+            status = self.default_microphone.status()
+            ready = status["is_cable"]
+            detail = ("普通和多媒体录音均为 CABLE Output。" if ready else "普通和多媒体录音尚未全部设为 CABLE Output。")
+            detail += "通话设备不修改。" + ("已保存原设备，可恢复。" if status["can_restore"] else "")
+            results.append(EnvironmentCheckItem(
+                "default_microphone", "默认录音设备", "pass" if ready else "warn", detail,
+                "" if ready else "点击“把默认录音设备设为 CABLE Output”。",
+            ))
+        except Exception as exc:
+            results.append(EnvironmentCheckItem(
+                "default_microphone", "默认录音设备", "warn", f"无法读取：{exc}",
+                "请确认 VB-CABLE 已安装；已有恢复备份不会被删除。",
+            ))
+        return results
+
+    def change_default_microphone(self, *, restore: bool) -> None:
+        if self._microphone_busy:
+            return
+        self._microphone_busy = True
+
+        def work() -> None:
+            try:
+                if restore:
+                    self.default_microphone.restore()
+                else:
+                    self.default_microphone.set_cable()
+                message = "已恢复原来的普通和多媒体录音设备。" if restore else "已将普通和多媒体录音设备设为 CABLE Output。"
+                self.root.after(0, lambda: messagebox.showinfo(APP_NAME, message + "通话设备未修改。"))
+            except Exception as exc:
+                detail = str(exc)
+                log(f"default microphone action failed: {detail}")
+                self.root.after(0, lambda: messagebox.showerror(APP_NAME, detail))
+            finally:
+                self._microphone_busy = False
+                self.root.after(0, self.environment_check.refresh)
+
+        threading.Thread(target=work, name="default-microphone", daemon=True).start()
+
 
     def show_environment_check(self) -> None:
         self.environment_check.show()
@@ -558,7 +598,7 @@ class XiaomiApp:
     @staticmethod
     def open_logs() -> None:
         LOG_DIR.mkdir(parents=True, exist_ok=True)
-        subprocess.Popen(["explorer", str(LOG_DIR)])
+        subprocess.Popen(["explorer", str(LOG_DIR)], creationflags=CREATE_NO_WINDOW, startupinfo=hidden_startupinfo())
 
     def restart_workers(self) -> None:
         try:
@@ -567,39 +607,6 @@ class XiaomiApp:
             log(f"worker restart failed: {type(exc).__name__}: {exc}\n{traceback.format_exc()}")
             self.status_var.set("后台桥接启动失败")
             self.detail_var.set("主窗口会继续保留。点击“打开日志”查看具体错误。")
-
-    def _start_updater(self) -> None:
-        self.updater.initialize()
-
-    def _can_install_update(self) -> bool:
-        settings_are_open = any(
-            process.poll() is None for process in self.settings_processes
-        )
-        return not settings_are_open and not getattr(
-            self, "_audio_repair_running", False
-        )
-
-    def _request_update_shutdown(self) -> None:
-        """Exit gracefully after WinSparkle launches the update installer."""
-
-        if threading.get_ident() == self._main_thread_id:
-            self.exit(for_update=True)
-            return
-
-        self._update_shutdown.request_and_wait()
-
-    def check_updates(self) -> None:
-        if not self.updater.initialized and not self.updater.initialize():
-            messagebox.showinfo(
-                "MiVibe Remote",
-                self.updater.disabled_reason or "当前无法启动在线更新服务。",
-            )
-            return
-        if not self.updater.check_with_ui():
-            messagebox.showerror(
-                "MiVibe Remote",
-                "无法打开更新检查，请稍后重试或查看日志。",
-            )
 
     def show_about(self) -> None:
         self.about.show()
@@ -613,7 +620,7 @@ class XiaomiApp:
 
         window = tk.Toplevel(self.root)
         self.guide_window = window
-        window.title("MiVibe Remote 使用教程")
+        window.title("Xiaomi Remote Agent 使用教程")
         window.geometry("720x650")
         window.minsize(640, 520)
         window.configure(bg="#eef2f7")
@@ -648,13 +655,13 @@ class XiaomiApp:
 
         steps = (
             ("1", "连接遥控器", "先在 Windows 蓝牙设置中连接“小米蓝牙语音遥控器”。方向键能移动光标，说明基础连接成功。"),
-            ("2", "运行环境检查", "点击主界面的“环境检查”。VB-CABLE 的 CABLE Input 和 CABLE Output 必须同时存在。"),
+            ("2", "运行环境检查", "确认 CABLE Input 和 CABLE Output 均存在。Claude 听写请点击“把默认录音设备设为 CABLE Output”；通话设备保持原样，可随时恢复。"),
             (
                 "3",
                 "选择一个预设",
-                "在“按键与语音设置”里选择 Codex、WorkBuddy、微信输入或千问办公；也可以点击“新增自定义”保存自己的整套配置。",
+                "默认选择“Claude + Codex”：语音 Ctrl+D、开关型、增益 4 dB。也可保存自定义预设。",
             ),
-            ("4", "核对输入法快捷键", "MiVibe 的语音快捷键、触发方式必须与目标输入法一致。按住说话请选择按住型；点一次开始、再点一次结束请选择开关型。"),
+            ("4", "核对输入法快捷键", "Claude 和 Codex 的听写快捷键应为 Ctrl+D 开关型。本程序在麦克风按下与松开时各轻点一次。Codex 麦克风选 CABLE Output，上一项/下一项会话绑定 Ctrl+Shift+F1/F2。"),
             ("5", "完成一次真实测试", "把光标放进文本框，按住遥控器原生麦克风键说完整一句话，松开后等待文字出现。"),
         )
         for number, title, detail in steps:
@@ -728,13 +735,13 @@ class XiaomiApp:
     def repair_audio(self) -> None:
         if getattr(self, "_audio_repair_running", False):
             messagebox.showinfo(
-                "MiVibe Remote",
+                "Xiaomi Remote Agent",
                 "语音驱动安装程序已在运行，请完成现有窗口后再试。",
             )
             return
         script = Path(sys.executable).resolve().parent / "support" / "configure-xiaomi-audio.ps1"
         if not script.is_file():
-            messagebox.showerror("MiVibe Remote", f"找不到语音驱动修复脚本：\n{script}")
+            messagebox.showerror("Xiaomi Remote Agent", f"找不到语音驱动修复脚本：\n{script}")
             return
         self.status_var.set("正在打开 VB-CABLE 官方安装程序")
         self.detail_var.set("请在官方安装窗口中点击 Install，完成后重启 Windows。")
@@ -756,8 +763,9 @@ class XiaomiApp:
                         str(Path(sys.executable).resolve().parent),
                     ],
                     cwd=str(script.parent),
-                    creationflags=CREATE_NO_WINDOW if os.name == "nt" else 0,
+                    creationflags=CREATE_NO_WINDOW,
                     check=False,
+                    startupinfo=hidden_startupinfo(),
                 )
                 log(f"audio repair exited code={result.returncode}")
             except Exception as exc:
@@ -777,11 +785,6 @@ class XiaomiApp:
         self.root.withdraw()
 
     def _poll(self) -> None:
-        if self._update_shutdown.dispatch_one(
-            lambda completion: self.exit(for_update=True, completion=completion)
-        ):
-            return
-
         status = self.workers.status()
         if status["bridge_alive"] and status["audio_alive"]:
             text = "按键桥接和小米语音均已运行"
@@ -802,15 +805,8 @@ class XiaomiApp:
             self.tray.title = f"{APP_NAME} · {text}"
         self.root.after(1000, self._poll)
 
-    def exit(
-        self,
-        *,
-        for_update: bool = False,
-        completion: threading.Event | None = None,
-    ) -> None:
+    def exit(self) -> None:
         if self._exiting:
-            if completion:
-                completion.set()
             return
         self._exiting = True
         self.stop_event.set()
@@ -820,23 +816,25 @@ class XiaomiApp:
             if process.poll() is None:
                 process.terminate()
         self.workers.stop()
-        # Calling WinSparkle cleanup from its own shutdown callback may wait on
-        # the callback and deadlock. The process unloads the DLL moments later.
-        if not for_update:
-            self.updater.cleanup()
         if self.tray:
             self.tray.stop()
-        if for_update:
-            self.root.destroy()
-        else:
-            self.root.after(80, self.root.destroy)
-        if completion:
-            completion.set()
+        self.root.after(80, self.root.destroy)
+
+
+def mivibe_is_running() -> bool:
+    """Read process names only; never terminate or alter the other application."""
+    for process in psutil.process_iter(["name"]):
+        try:
+            if (process.info.get("name") or "").casefold() == "miviberemote.exe":
+                return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return False
 
 
 def acquire_single_instance() -> bool:
     handle = ctypes.windll.kernel32.CreateMutexW(
-        None, False, "Global\\MiVibeRemoteApp"
+        None, False, "Global\\XiaomiRemoteAgentApp"
     )
     if ctypes.windll.kernel32.GetLastError() == 183:
         try:
@@ -856,8 +854,18 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=f"{APP_NAME} {APP_VERSION}")
     parser.add_argument("--minimized", action="store_true")
     args = parser.parse_args(arguments)
+    if mivibe_is_running():
+        ctypes.windll.user32.MessageBoxW(
+            None, "请先退出 MiVibe Remote，两者不能同时连接遥控器", APP_NAME, 0x30
+        )
+        return 1
     if not acquire_single_instance():
         return 0
+    try:
+        catalog = refresh_app_ids()
+        log(f"Installed application identities: {catalog}")
+    except Exception as exc:
+        log(f"Application discovery failed: {exc}")
     # Materialize the customer-owned config before workers and settings start.
     load_config(CONFIG_PATH)
     root = tk.Tk()
@@ -880,8 +888,8 @@ def run_with_crash_report() -> int:
             try:
                 ctypes.windll.user32.MessageBoxW(
                     None,
-                    f"MiVibe Remote 启动失败，错误已写入：\n{HOST_LOG}\n\n{type(exc).__name__}: {exc}",
-                    "MiVibe Remote",
+                    f"Xiaomi Remote Agent 启动失败，错误已写入：\n{HOST_LOG}\n\n{type(exc).__name__}: {exc}",
+                    "Xiaomi Remote Agent",
                     0x10,
                 )
             except Exception:

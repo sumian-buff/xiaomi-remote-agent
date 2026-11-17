@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
   [ValidateSet("Install", "Finish", "Repair", "Restore", "Audit", "ValidatePackage")]
   [string] $Mode = "Install",
@@ -9,18 +9,18 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$ProductName = "MiVibe Remote"
+$ProductName = "Xiaomi Remote Agent"
 $DriverDownloadUrl = "https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip"
 $ExpectedZipSha256 = "b950e39f01af1d04ea623c8f6d8eb9b6ea5c477c637295fabf20631c85116bfb"
-$StateRoot = Join-Path $env:LOCALAPPDATA "MiVibeRemote\BridgeAudio"
+$StateRoot = Join-Path $env:APPDATA "XiaomiRemoteAgent\BridgeAudio"
 $DriverRoot = Join-Path $StateRoot "VB-CABLE"
 $DownloadedDriverZip = Join-Path $StateRoot "VBCABLE_Driver_Pack45.zip"
 $PreviousMicFile = Join-Path $StateRoot "previous-default-microphone.txt"
 $RebootFlag = Join-Path $StateRoot "reboot-required.flag"
 $RunOnceKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce"
-$RunOnceName = "MiVibeRemoteAudioFinish"
-$ReportPath = Join-Path ([Environment]::GetFolderPath("Desktop")) "MiVibeRemote-audio-check.txt"
-$SetupMutex = New-Object Threading.Mutex($false, "Local\MiVibeRemoteAudioSetup")
+$RunOnceName = "XiaomiRemoteAgentAudioFinish"
+$ReportPath = Join-Path $StateRoot "audio-check.txt"
+$SetupMutex = New-Object Threading.Mutex($false, "Local\XiaomiRemoteAgentAudioSetup")
 $OwnsSetupMutex = $false
 
 try {
@@ -262,10 +262,10 @@ try {
       if (Test-VBCableReady) {
         Remove-Item -LiteralPath $RebootFlag -Force -ErrorAction SilentlyContinue
       } else {
-        # MiVibe installation must remain usable for button mapping even when
+        # Xiaomi Remote Agent installation must remain usable for button mapping even when
         # the optional third-party audio driver is absent.  The user starts the
-        # vendor installer explicitly from MiVibe or the Start menu repair item.
-        $result = "VB-CABLE is not installed; open MiVibe and click Install/Repair voice driver"
+        # vendor installer explicitly from Xiaomi Remote Agent or the Start menu repair item.
+        $result = "VB-CABLE is not installed; open Xiaomi Remote Agent and click Install/Repair voice driver"
       }
     }
     "Finish" {
@@ -279,7 +279,7 @@ try {
         Restore-DefaultMicrophone
         $result = "VB-CABLE is ready; restart Windows if voice applications cannot see it"
       } else {
-        $result = "Official VB-CABLE installer opened; finish Install Driver, restart Windows, then reopen MiVibe"
+        $result = "Official VB-CABLE installer opened; finish Install Driver, restart Windows, then reopen Xiaomi Remote Agent"
       }
     }
     "Restore" {
@@ -299,7 +299,7 @@ try {
 }
 
 @(
-  "MiVibe Remote audio check",
+  "Xiaomi Remote Agent audio check",
   "Time: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
   "Mode: $Mode",
   "Result: $result",

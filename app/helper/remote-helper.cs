@@ -1,9 +1,11 @@
-// remote-helper.exe — actions for the Xiaomi remote, launched by MiVibe Remote.
+// SPDX-License-Identifier: GPL-3.0-only
+// remote-helper.exe — actions for Xiaomi Remote Agent.
 //
 //   remote-helper.exe activate <AUMID>   bring a packaged app (e.g. Claude, Codex) to the front, or start it
 //   remote-helper.exe session prev|next  left/right keys: previous/next session in the active app, using that
 //                                        app's shortcut from remote-helper.json; plain Left/Right if it has none
 //   remote-helper.exe scroll <delta>     volume keys: scroll the conversation under an auto-placed cursor
+//   remote-helper.exe apps <json-path>   enumerate installed app names and AppIDs without launching them
 //   remote-helper.exe shortcut <lnk> <AUMID>  (re)create a .lnk that points at the app itself, so its
 //                                        icon and target follow app updates
 //
@@ -13,6 +15,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -39,6 +42,9 @@ static class Helper
                 case "arrow": Arrow(args[1].ToLowerInvariant() == "up"); return 0;
                 case "ok": Ok(); return 0;
                 case "scroll": Scroll(cfg, args.Length > 1 ? int.Parse(args[1]) : cfg.scrollDelta); return 0;
+                case "apps":
+                    if (args.Length != 2) return 2;
+                    ExportApps(args[1]); return 0;
                 case "shortcut": Lnk.Create(args[1], args[2]); return 0;
             }
             return 2;
@@ -48,6 +54,54 @@ static class Helper
             try { File.AppendAllText(LogFile, DateTime.Now.ToString("s") + " " + string.Join(" ", args) + " : " + e + Environment.NewLine); } catch { }
             return 1;
         }
+    }
+
+    // Read AppsFolder directly so application updates cannot leave us using stale .lnk targets.
+    // Reflection keeps this compatible with the system .NET Framework compiler without dynamic.
+    static void ExportApps(string outputPath)
+    {
+        object shell = null, folder = null, items = null;
+        var apps = new List<Dictionary<string, string>>();
+        try
+        {
+            shell = Activator.CreateInstance(Type.GetTypeFromProgID("Shell.Application", true));
+            folder = shell.GetType().InvokeMember("NameSpace", BindingFlags.InvokeMethod, null,
+                shell, new object[] { "shell:AppsFolder" });
+            if (folder == null) throw new InvalidOperationException("shell:AppsFolder is unavailable");
+            items = folder.GetType().InvokeMember("Items", BindingFlags.InvokeMethod, null, folder, null);
+            int count = Convert.ToInt32(items.GetType().InvokeMember("Count", BindingFlags.GetProperty,
+                null, items, null));
+            for (int index = 0; index < count; index++)
+            {
+                object item = null;
+                try
+                {
+                    item = items.GetType().InvokeMember("Item", BindingFlags.InvokeMethod, null,
+                        items, new object[] { index });
+                    string name = Convert.ToString(item.GetType().InvokeMember("Name",
+                        BindingFlags.GetProperty, null, item, null));
+                    string appId = Convert.ToString(item.GetType().InvokeMember("ExtendedProperty",
+                        BindingFlags.InvokeMethod, null, item, new object[] { "System.AppUserModel.ID" }));
+                    if (!string.IsNullOrEmpty(appId))
+                        apps.Add(new Dictionary<string, string> { { "name", name }, { "app_id", appId } });
+                }
+                finally { ReleaseCom(item); }
+            }
+        }
+        finally
+        {
+            ReleaseCom(items);
+            ReleaseCom(folder);
+            ReleaseCom(shell);
+        }
+        string destination = Path.GetFullPath(outputPath);
+        Directory.CreateDirectory(Path.GetDirectoryName(destination));
+        File.WriteAllText(destination, new JavaScriptSerializer().Serialize(apps), new UTF8Encoding(false));
+    }
+
+    static void ReleaseCom(object value)
+    {
+        if (value != null && Marshal.IsComObject(value)) Marshal.FinalReleaseComObject(value);
     }
 
     // ---------- scroll / session switch ----------
@@ -315,6 +369,20 @@ static class Helper
 
     static void Activate(string aumid)
     {
+        if (aumid.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("AppID required; shortcuts are not supported");
+        // Retained optional desktop-app presets use their shell AppIDs too.
+        if (aumid.IndexOf('!') < 0)
+        {
+            object shell = Activator.CreateInstance(Type.GetTypeFromProgID("Shell.Application", true));
+            try
+            {
+                shell.GetType().InvokeMember("ShellExecute", BindingFlags.InvokeMethod, null,
+                    shell, new object[] { "shell:AppsFolder\\" + aumid, "", "", "open", 1 });
+            }
+            finally { ReleaseCom(shell); }
+            return;
+        }
         // Package family "Name_PublisherId" -> installed path contains "\Name_" ... "__PublisherId\"
         string family = aumid.Split('!')[0];
         int cut = family.LastIndexOf('_');

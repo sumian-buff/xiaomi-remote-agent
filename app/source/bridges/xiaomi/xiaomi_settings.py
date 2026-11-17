@@ -16,10 +16,12 @@ from tkinter import messagebox, simpledialog, ttk
 import uuid
 
 from .xiaomi_config import (
+    AGENT_VOICE_TRIGGER_MODE,
     APP_VERSION,
     BUTTONS,
     CODEX_VOICE_TRIGGER_MODE,
     CONFIG_PATH,
+    DEFAULT_GAIN_DB,
     DEFAULT_VOICE_HOTKEY,
     KEYS_CONFIG_PATH,
     MAPPING_SCHEMA_VERSION,
@@ -27,6 +29,7 @@ from .xiaomi_config import (
     QIANWEN_VOICE_TRIGGER_MODE,
     WORKBUDDY_VOICE_TRIGGER_MODE,
     WECHAT_VOICE_TRIGGER_MODE,
+    agent_button_bindings,
     apply_remote_identity,
     codex_button_bindings,
     custom_preset_definitions,
@@ -46,8 +49,8 @@ from .xiaomi_config import (
 )
 
 
-APP_NAME = "MiVibe Remote 设置"
-DEFAULT_HUB_PORT = 28690
+APP_NAME = "Xiaomi Remote Agent 设置"
+DEFAULT_HUB_PORT = 32690
 SETTINGS_CONTROL_PORT_OFFSET = 1
 CONTROL_REQUEST_TIMEOUT = 6.0
 BG = "#eef2f7"
@@ -229,6 +232,8 @@ def format_action(actions) -> str:
         return format_keys([str(action.get("key", ""))])
     if action_type == "text":
         return f"输入文本：{action.get('text', '')}"
+    if action_type == "helper":
+        return "助手：" + " ".join(str(value) for value in action.get("args", []))
     if action_type == "command":
         return str(action.get("label") or "启动程序")
     if action_type == "preset_cycle":
@@ -272,7 +277,7 @@ def send_hub_restart(port: int, timeout: float = CONTROL_REQUEST_TIMEOUT) -> int
             response, _ = client.recvfrom(4096)
     except (OSError, TimeoutError) as exc:
         raise RuntimeError(
-            "主程序没有确认桥接重启，请回到 MiVibe 主界面点击“重启桥接”后重试"
+            "主程序没有确认桥接重启，请回到 Xiaomi Remote Agent 主界面点击“重启桥接”后重试"
         ) from exc
 
     try:
@@ -653,11 +658,11 @@ class XiaomiSettingsWindow:
         self.working_custom_presets = copy.deepcopy(
             custom_preset_definitions(self.keys_config)
         )
-        self.working_preset = str(self.config.get("active_preset", "codex"))
+        self.working_preset = str(self.config.get("active_preset", PRESET_ORDER[0]))
         if self.working_preset not in set(PRESET_ORDER) | set(
             self.working_custom_presets
         ):
-            self.working_preset = "codex"
+            self.working_preset = PRESET_ORDER[0]
         self.working_profiles = copy.deepcopy(
             self.keys_config.get("preset_bindings", {})
         )
@@ -710,11 +715,11 @@ class XiaomiSettingsWindow:
         self.voice_trigger_mode = tk.StringVar(
             value=(
                 "按住型"
-                if str(self.config.get("voice_trigger_mode", "hold")) == "hold"
+                if str(self.config.get("voice_trigger_mode", AGENT_VOICE_TRIGGER_MODE)) == "hold"
                 else "开关型"
             )
         )
-        self.gain_db = tk.StringVar(value=str(self.config.get("gain_db", 10.0)))
+        self.gain_db = tk.StringVar(value=str(self.config.get("gain_db", DEFAULT_GAIN_DB)))
 
         self.capture = KeyboardShortcutCapture(
             self.root, self._capture_complete, self._capture_failed
@@ -898,7 +903,7 @@ class XiaomiSettingsWindow:
         title_block.pack(side="left", fill="y")
         tk.Label(
             title_block,
-            text="MiVibe Remote",
+            text="Xiaomi Remote Agent",
             bg=NAVY,
             fg="#ffffff",
             font=("Segoe UI", 18, "bold"),
@@ -985,7 +990,7 @@ class XiaomiSettingsWindow:
         self.canvas.bind("<Leave>", self._canvas_leave)
         tk.Label(
             left_card,
-            text="MiVibe Remote 2  ·  蓝色光圈表示当前按键",
+            text="Xiaomi Remote Agent 2  ·  蓝色光圈表示当前按键",
             bg=CARD,
             fg=MUTED,
             font=("Microsoft YaHei UI", 8),
@@ -1236,6 +1241,7 @@ class XiaomiSettingsWindow:
             font=("Microsoft YaHei UI", 9, "bold"),
         ).pack(side="left", padx=(0, 10))
         for preset_id, label, command in (
+            ("agent", "Claude + Codex", self.apply_agent_preset),
             ("codex", "Codex", self.apply_codex_preset),
             ("workbuddy", "WorkBuddy", self.apply_workbuddy_preset),
             ("wechat", "微信输入", self.apply_wechat_preset),
@@ -1303,6 +1309,7 @@ class XiaomiSettingsWindow:
 
     def _refresh_preset_styles(self) -> None:
         labels = {
+            "agent": "Claude + Codex",
             "codex": "Codex 模式",
             "workbuddy": "WorkBuddy 模式",
             "wechat": "微信输入模式",
@@ -1654,7 +1661,7 @@ class XiaomiSettingsWindow:
         self.canvas.create_text(
             180,
             488,
-            text="MiVibe",
+            text="Xiaomi Remote Agent",
             fill="#4f5967",
             font=("Segoe UI", 11, "bold"),
             tags=("remote_body",),
@@ -1888,6 +1895,7 @@ class XiaomiSettingsWindow:
 
     def restore_selected(self) -> None:
         defaults = {
+            "agent": agent_button_bindings,
             "codex": codex_button_bindings,
             "workbuddy": workbuddy_button_bindings,
             "wechat": wechat_button_bindings,
@@ -1910,9 +1918,10 @@ class XiaomiSettingsWindow:
     def restore_all(self) -> None:
         if not messagebox.askyesno(APP_NAME, "恢复所有按键的默认映射？"):
             return
-        self.working_preset = "codex"
-        self.working_bindings = codex_button_bindings()
+        self.working_preset = PRESET_ORDER[0]
+        self.working_bindings = agent_button_bindings()
         self.working_profiles = {
+            "agent": agent_button_bindings(),
             "codex": codex_button_bindings(),
             "workbuddy": workbuddy_button_bindings(),
             "wechat": wechat_button_bindings(),
@@ -1923,12 +1932,22 @@ class XiaomiSettingsWindow:
                 if preset in self.working_custom_presets
             },
         }
+        self.gain_db.set(str(DEFAULT_GAIN_DB))
         self.voice_enabled.set(True)
         self.voice_trigger_mode.set(
-            "按住型" if CODEX_VOICE_TRIGGER_MODE == "hold" else "开关型"
+            "按住型" if AGENT_VOICE_TRIGGER_MODE == "hold" else "开关型"
         )
         self.save_status_var.set("已恢复默认，尚未保存")
         self._refresh_preset_styles()
+        self.select_button(self.selected_id)
+
+    def apply_agent_preset(self) -> None:
+        self._switch_preset("agent")
+        self.voice_enabled.set(True)
+        self.voice_trigger_mode.set("开关型")
+        self.save_status_var.set("已载入 Claude + Codex 预设，点击“保存并应用”后生效")
+        self._refresh_preset_styles()
+        self.selected_id = "menu"
         self.select_button(self.selected_id)
 
     def apply_codex_preset(self) -> None:
@@ -2071,6 +2090,7 @@ class XiaomiSettingsWindow:
         self._remember_working_preset()
         self.working_preset = preset
         defaults = {
+            "agent": agent_button_bindings,
             "codex": codex_button_bindings,
             "workbuddy": workbuddy_button_bindings,
             "wechat": wechat_button_bindings,
@@ -2081,7 +2101,7 @@ class XiaomiSettingsWindow:
             or (
                 defaults[preset]()
                 if preset in defaults
-                else codex_button_bindings()
+                else agent_button_bindings()
             )
         )
         self.working_bindings.update(cycle_bindings)

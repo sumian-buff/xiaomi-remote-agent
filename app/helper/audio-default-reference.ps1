@@ -1,4 +1,7 @@
-﻿# Read / set the Windows default recording device (console + multimedia roles).
+# Historical implementation reference only; never invoked by the application.
+# Runtime replacement: source/standalone/default_microphone.py (ctypes).
+# SPDX-License-Identifier: GPL-3.0-only
+# Read / set the Windows default recording device (console + multimedia roles).
 # The communications role is left alone so call apps keep using the headset mic.
 if (-not ('MiVibeAudio.Default' -as [type])) {
 Add-Type -TypeDefinition @'

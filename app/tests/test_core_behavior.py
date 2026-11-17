@@ -14,11 +14,7 @@ if str(SOURCE) not in sys.path:
     sys.path.insert(0, str(SOURCE))
 
 from bridges.audio import audio_router
-from bridges.hanvon import hanvon_pen_app
-from bridges.hanvon import voice_typing_hid as hanvon_core
-from bridges import native_audio
-from bridges.physical_hotkey_monitor import PhysicalHotkeyState
-from bridges import raw_input_bridge as t1_core
+from bridges import raw_input_bridge as raw_core
 from bridges.xiaomi import atvv_live_bridge as xiaomi_core
 from bridges.xiaomi import hid_report_tap
 from bridges.xiaomi import hid_tap_injector
@@ -118,7 +114,7 @@ class XiaomiCoreBehaviorTests(unittest.TestCase):
             "home": [
                 {
                     "type": "command",
-                    "args": ["powershell.exe", "-Command", "Start-Process 'codex:'"],
+                    "args": ["example-app.exe", "--mode", "test"],
                 }
             ]
         }
@@ -135,9 +131,10 @@ class XiaomiCoreBehaviorTests(unittest.TestCase):
 
         self.assertTrue(handled)
         launch.assert_called_once_with(
-            ["powershell.exe", "-Command", "Start-Process 'codex:'"],
+            ["example-app.exe", "--mode", "test"],
             cwd=None,
-            creationflags=getattr(xiaomi_core.subprocess, "CREATE_NO_WINDOW", 0),
+            creationflags=xiaomi_core.CREATE_NO_WINDOW,
+            startupinfo=mock.ANY,
         )
         hook._load_bridge_core.assert_not_called()
 
@@ -202,7 +199,7 @@ class XiaomiCoreBehaviorTests(unittest.TestCase):
 
     def test_raw_mapping_dispatches_native_mouse_wheel(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            bridge = t1_core.T1Bridge.__new__(t1_core.T1Bridge)
+            bridge = raw_core.RawInputBridge.__new__(raw_core.RawInputBridge)
             bridge.action_handlers = {}
             bridge.current_mode = "default"
             bridge.last_action_at = {}
@@ -210,7 +207,7 @@ class XiaomiCoreBehaviorTests(unittest.TestCase):
             bridge.verbose = False
             bridge.dry_run = False
 
-            with mock.patch.object(t1_core, "send_mouse_wheel") as send_wheel:
+            with mock.patch.object(raw_core, "send_mouse_wheel") as send_wheel:
                 bridge.run_action(
                     {"event_id": "kbd:VK_26:SC_048:E0:down"},
                     {"type": "mouse_wheel", "delta": 120},
@@ -246,9 +243,13 @@ class XiaomiCoreBehaviorTests(unittest.TestCase):
         self.assertFalse(any("(OI)(CI)" in item for item in file_command))
         self.assertNotIn("/T", file_command)
 
-    def test_embedded_mapping_does_not_claim_t1_control_port(self) -> None:
+    def test_embedded_mapping_does_not_claim_an_extra_control_port(self) -> None:
         cycle_handler = mock.Mock(return_value="workbuddy")
-        with mock.patch.object(t1_core, "main") as mapping_main:
+        with (
+            mock.patch.object(raw_core, "main") as mapping_main,
+            mock.patch.object(xiaomi_core, "load_keys_config", return_value=xiaomi_config.default_keys_config()),
+            mock.patch("builtins.print"),
+        ):
             thread = xiaomi_core.start_raw_mapping_thread(
                 True, lambda *_args: True, cycle_handler
             )
@@ -265,7 +266,7 @@ class XiaomiCoreBehaviorTests(unittest.TestCase):
 
     def test_raw_mapping_dispatches_preset_cycle_handler(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            bridge = t1_core.T1Bridge.__new__(t1_core.T1Bridge)
+            bridge = raw_core.RawInputBridge.__new__(raw_core.RawInputBridge)
             handler = mock.Mock(return_value="workbuddy")
             bridge.action_handlers = {"preset_cycle": handler}
             bridge.current_mode = "default"
@@ -499,195 +500,6 @@ class AudioRouterBehaviorTests(unittest.TestCase):
         self.assertEqual(stats["signal_chunks"], 2)
         self.assertGreater(stats["rms"], 0.0)
         self.assertEqual(output.packet_stats()["chunks"], 0)
-
-
-class HanvonCoreBehaviorTests(unittest.TestCase):
-    @staticmethod
-    def _engine(config: dict | None = None):
-        cfg = {
-            "voice_shortcut_enabled": True,
-            "voice_hotkey": "Right Alt",
-            "voice_trigger_mode": "toggle",
-            "refresh_mic_before_pen_hotkey": True,
-        }
-        if config:
-            cfg.update(config)
-        engine = hanvon_pen_app.BridgeEngine.__new__(hanvon_pen_app.BridgeEngine)
-        engine._config = cfg
-        engine._config_lock = threading.Lock()
-        engine._voice_lock = threading.RLock()
-        engine._audio_lock = threading.Lock()
-        engine._audio_token = None
-        engine._voice_active = False
-        engine._shortcut_ignore_until = 0.0
-        engine._voice_shortcut_down = False
-        engine._held_voice_hotkey = ""
-        engine._audio_router = mock.Mock()
-        engine._write_voice_runtime_state = mock.Mock()
-        return engine
-
-    def test_voice_shortcut_is_not_toggled_when_audio_route_fails(self) -> None:
-        engine = self._engine()
-        engine._open_pen_audio = mock.Mock(return_value=False)
-        with (
-            mock.patch.object(hanvon_pen_app, "send_hotkey") as send_hotkey,
-            mock.patch.object(hanvon_pen_app.core, "refresh_v60_mic") as refresh_mic,
-            mock.patch.object(hanvon_pen_app, "app_log"),
-        ):
-            result = engine._handle_voice_button(
-                {
-                    "voice_shortcut_enabled": True,
-                    "voice_hotkey": "Right Alt",
-                    "voice_trigger_mode": "toggle",
-                    "refresh_mic_before_pen_hotkey": True,
-                }
-            )
-
-        self.assertEqual(result, "voice_start_failed:audio_unavailable")
-        send_hotkey.assert_not_called()
-        refresh_mic.assert_not_called()
-
-    def test_voice_start_rolls_back_audio_if_shortcut_send_fails(self) -> None:
-        engine = self._engine()
-        engine._open_pen_audio = mock.Mock(return_value=True)
-        engine._close_pen_audio = mock.Mock()
-        with (
-            mock.patch.object(
-                hanvon_pen_app,
-                "send_hotkey",
-                side_effect=OSError("simulated SendInput failure"),
-            ),
-            mock.patch.object(hanvon_pen_app.core, "refresh_v60_mic"),
-        ):
-            with self.assertRaises(OSError):
-                engine._handle_voice_button(engine.get_config())
-
-        engine._close_pen_audio.assert_called_once_with("shortcut_start_failed")
-        self.assertFalse(engine._voice_active)
-
-    def test_pen_button_uses_locked_current_voice_state(self) -> None:
-        """A pen edge must not use a stale state sampled by its caller."""
-        engine = self._engine()
-        engine._voice_active = True
-        engine._close_pen_audio = mock.Mock()
-        with mock.patch.object(hanvon_pen_app, "send_hotkey") as send_hotkey:
-            result = engine._handle_voice_button(engine.get_config())
-
-        self.assertEqual(result, "voice_stop:toggle:Right Alt")
-        send_hotkey.assert_called_once_with("Right Alt")
-        engine._close_pen_audio.assert_called_once_with("second_press", tail_ms=120)
-        self.assertFalse(engine._voice_active)
-
-    def test_engine_shutdown_stops_toggle_before_closing_audio(self) -> None:
-        engine = self._engine()
-        engine._voice_active = True
-        calls: list[str] = []
-        engine._close_pen_audio = lambda *_args, **_kwargs: calls.append("audio_close")
-        with mock.patch.object(
-            hanvon_pen_app,
-            "send_hotkey",
-            side_effect=lambda _hotkey: calls.append("shortcut_stop"),
-        ):
-            engine._close_all_audio("engine_stop")
-
-        self.assertEqual(calls, ["shortcut_stop", "audio_close"])
-        self.assertFalse(engine._voice_active)
-
-    def test_physical_keyboard_hotkey_updates_v60_audio_state(self) -> None:
-        engine = self._engine()
-        engine._open_pen_audio = mock.Mock(return_value=True)
-        engine._close_pen_audio = mock.Mock()
-        with mock.patch.object(hanvon_pen_app.core, "refresh_v60_mic"):
-            started = engine._handle_external_voice_hotkey(engine.get_config(), True)
-            stopped = engine._handle_external_voice_hotkey(engine.get_config(), True)
-
-        self.assertEqual(started, "keyboard_start")
-        self.assertEqual(stopped, "keyboard_stop")
-        engine._open_pen_audio.assert_called_once_with()
-        engine._close_pen_audio.assert_called_once_with(
-            "keyboard_stop", tail_ms=120
-        )
-        self.assertFalse(engine._voice_active)
-
-    def test_injected_right_alt_is_never_counted_as_a_physical_toggle(self) -> None:
-        state = PhysicalHotkeyState()
-        target = (0xA5,)
-        self.assertIsNone(state.feed(0xA5, True, target, injected=True))
-        self.assertIsNone(state.feed(0xA5, False, target, injected=True))
-        self.assertTrue(state.feed(0xA5, True, target))
-        self.assertIsNone(state.feed(0xA5, True, target))
-        self.assertFalse(state.feed(0xA5, False, target))
-
-    def test_generic_alt_target_accepts_physical_right_alt(self) -> None:
-        state = PhysicalHotkeyState()
-        self.assertTrue(state.feed(0xA5, True, (0x12,)))
-        self.assertFalse(state.feed(0xA5, False, (0x12,)))
-
-    def test_v60_standalone_mode_uses_native_microphone_tracker(self) -> None:
-        with mock.patch.dict(
-            "os.environ", {"REMOTE_BRIDGE_AUDIO_TRANSPORT": "native"}
-        ):
-            engine = hanvon_pen_app.BridgeEngine(hanvon_pen_app.default_config())
-        self.assertIsInstance(engine._audio_router, native_audio.NativeAudioSessionClient)
-    def test_lost_audio_session_stops_external_toggle_and_clears_state(self) -> None:
-        engine = self._engine()
-        engine._audio_token = "token-1"
-        engine._voice_active = True
-        with mock.patch.object(hanvon_pen_app, "send_hotkey") as send_hotkey:
-            reconciled = engine._reconcile_lost_audio(
-                "token-1", "audio_session_lost"
-            )
-
-        self.assertTrue(reconciled)
-        send_hotkey.assert_called_once_with("Right Alt")
-        self.assertIsNone(engine._audio_token)
-        self.assertFalse(engine._voice_active)
-
-    def test_v60_dynamic_microphone_report_is_stable_and_well_formed(self) -> None:
-        report, seed, token = hanvon_core._make_mic_dynamic_report(1_700_000_000)
-        self.assertEqual(seed, 1_700_000_000)
-        self.assertEqual(token, 0x6F2E0403)
-        self.assertEqual(len(report), 33)
-        self.assertEqual(report[:9], bytes.fromhex("000600000000020501"))
-        self.assertEqual(report[9:14], bytes.fromhex("3b03042e6f"))
-        self.assertEqual(report[14:], bytes(19))
-
-    def test_v60_microphone_interface_match_is_strict(self) -> None:
-        interface = {
-            "vendor_id": 0x0611,
-            "product_id": 0x3001,
-            "interface_number": 5,
-            "usage_page": 0xFF00,
-        }
-        self.assertTrue(hanvon_core._is_v60_mic_iface(interface))
-        for key in interface:
-            changed = dict(interface)
-            changed[key] = 0
-            self.assertFalse(hanvon_core._is_v60_mic_iface(changed), key)
-
-
-class NativeAudioBehaviorTests(unittest.TestCase):
-    def test_native_session_tracks_endpoint_without_opening_a_virtual_cable(self) -> None:
-        client = native_audio.NativeAudioSessionClient("hanvon")
-        with mock.patch.object(
-            native_audio,
-            "active_capture_endpoint_names",
-            return_value=["麦克风 (Ai Pointer)"],
-        ):
-            token = client.open("Ai Pointer")
-        status = client.status()
-        self.assertTrue(status["sources"]["hanvon"]["native"])
-        self.assertEqual(status["sources"]["hanvon"]["endpoint"], "麦克风 (Ai Pointer)")
-        self.assertTrue(client.close(token)["closed"])
-        self.assertEqual(client.status()["sources"], {})
-
-    def test_native_session_rejects_a_missing_device(self) -> None:
-        client = native_audio.NativeAudioSessionClient("t1")
-        with (
-            mock.patch.object(native_audio, "active_capture_endpoint_names", return_value=[]),
-            self.assertRaises(native_audio.AudioRouterError),
-        ):
-            client.open("Mic Device")
 
 
 if __name__ == "__main__":

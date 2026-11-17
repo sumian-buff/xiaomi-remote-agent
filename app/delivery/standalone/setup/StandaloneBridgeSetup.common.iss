@@ -63,68 +63,25 @@ Source: "{#ReadmeFile}"; DestDir: "{app}"; DestName: "使用说明.txt"; Flags: 
 Source: "..\..\..\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; DestName: "第三方组件说明.md"; Flags: ignoreversion
 Source: "stop-product.ps1"; DestDir: "{app}\support"; Flags: ignoreversion
 Source: "stop-product.ps1"; Flags: dontcopy
-#if ProductKind == "xiaomi"
 Source: "configure-xiaomi-audio.ps1"; DestDir: "{app}\support"; Flags: ignoreversion
-Source: "..\..\vendor\frida-COPYING.txt"; DestDir: "{app}\support\third-party"; Flags: ignoreversion
-Source: "..\..\vendor\winsparkle\COPYING"; DestDir: "{app}\support\third-party"; DestName: "WinSparkle-COPYING.txt"; Flags: ignoreversion
-Source: "..\..\vendor\winsparkle\COPYING.expat"; DestDir: "{app}\support\third-party"; DestName: "WinSparkle-COPYING.expat.txt"; Flags: ignoreversion
-#else
-Source: "configure-native-audio.ps1"; DestDir: "{app}\support"; Flags: ignoreversion
-#endif
+Source: "..\..\..\licenses\frida-COPYING.txt"; DestDir: "{app}\support\third-party"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#AppGroupName}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; Tasks: startmenuicon
 Name: "{autoprograms}\{#AppGroupName}\{#AppName} 使用说明"; Filename: "{sys}\notepad.exe"; Parameters: """{app}\使用说明.txt"""; Tasks: startmenuicon
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
 Name: "{userstartup}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Parameters: "--minimized"; WorkingDir: "{app}"; Tasks: startup
-#if ProductKind == "xiaomi"
-Name: "{autoprograms}\{#AppGroupName}\小米语音环境检查与修复"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\support\configure-xiaomi-audio.ps1"" -Mode Repair -AppPath ""{app}"""; WorkingDir: "{app}\support"
-#else
-Name: "{autoprograms}\{#AppGroupName}\{#AppName} 麦克风检查与修复"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\support\configure-native-audio.ps1"" -Mode Repair -ProductId ""{#ProductId}"" -ProductName ""{#AppName}"" -EndpointPattern ""{#EndpointPattern}"""; WorkingDir: "{app}\support"
-#endif
+Name: "{autoprograms}\{#AppGroupName}\小米语音环境检查与修复"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\support\configure-xiaomi-audio.ps1"" -Mode Repair -AppPath ""{app}"""; WorkingDir: "{app}\support"
 
 [Run]
-#if ProductKind == "xiaomi"
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\support\configure-xiaomi-audio.ps1"" -Mode Install -AppPath ""{app}"""; WorkingDir: "{app}\support"; StatusMsg: "正在检查小米语音环境..."; Flags: waituntilterminated skipifsilent; Check: not IsOnlineUpdate
-#else
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\support\configure-native-audio.ps1"" -Mode Install -ProductId ""{#ProductId}"" -ProductName ""{#AppName}"" -EndpointPattern ""{#EndpointPattern}"""; WorkingDir: "{app}\support"; StatusMsg: "正在配置设备自带麦克风..."; Flags: waituntilterminated skipifsilent
-#endif
-Filename: "{app}\{#AppExeName}"; Description: "立即启动 {#AppName}"; WorkingDir: "{app}"; Flags: nowait postinstall; Check: ShouldLaunchApplication
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\support\configure-xiaomi-audio.ps1"" -Mode Install -AppPath ""{app}"""; WorkingDir: "{app}\support"; StatusMsg: "正在检查小米语音环境..."; Flags: runhidden waituntilterminated skipifsilent
+Filename: "{app}\{#AppExeName}"; Description: "立即启动 {#AppName}"; WorkingDir: "{app}"; Flags: nowait postinstall
 
 [UninstallRun]
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\support\stop-product.ps1"" -AppPath ""{app}"""; Flags: runhidden waituntilterminated; RunOnceId: "StopProduct"
-#if ProductKind == "xiaomi"
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\support\configure-xiaomi-audio.ps1"" -Mode Restore -AppPath ""{app}"""; Flags: runhidden waituntilterminated; RunOnceId: "RestoreMicrophone"
-#else
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\support\configure-native-audio.ps1"" -Mode Restore -ProductId ""{#ProductId}"" -ProductName ""{#AppName}"" -EndpointPattern ""{#EndpointPattern}"""; Flags: runhidden waituntilterminated; RunOnceId: "RestoreMicrophone"
-#endif
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\support\stop-product.ps1"" -AppPath ""{app}"""; Flags: runhidden waituntilterminated; RunOnceId: "StopProduct"
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\support\configure-xiaomi-audio.ps1"" -Mode Restore -AppPath ""{app}"""; Flags: runhidden waituntilterminated; RunOnceId: "RestoreMicrophone"
 
 [Code]
-function HasCommandLineSwitch(Value: String): Boolean;
-var
-  Index: Integer;
-begin
-  Result := False;
-  for Index := 1 to ParamCount do
-  begin
-    if CompareText(ParamStr(Index), Value) = 0 then
-    begin
-      Result := True;
-      exit;
-    end;
-  end;
-end;
-
-function IsOnlineUpdate(): Boolean;
-begin
-  Result := HasCommandLineSwitch('/UPDATED');
-end;
-
-function ShouldLaunchApplication(): Boolean;
-begin
-  Result := IsOnlineUpdate() or (not WizardSilent());
-end;
-
 function StopRunningProduct(): Boolean;
 var
   ResultCode: Integer;
@@ -132,7 +89,7 @@ begin
   ExtractTemporaryFile('stop-product.ps1');
   Result := Exec(
     ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
-    '-NoProfile -ExecutionPolicy Bypass -File ' + AddQuotes(ExpandConstant('{tmp}\stop-product.ps1')) + ' -AppPath ' + AddQuotes(ExpandConstant('{app}')),
+    '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ' + AddQuotes(ExpandConstant('{tmp}\stop-product.ps1')) + ' -AppPath ' + AddQuotes(ExpandConstant('{app}')),
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode
   ) and (ResultCode = 0);
 end;

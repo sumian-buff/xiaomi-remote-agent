@@ -24,12 +24,9 @@ class XiaomiConfigTests(unittest.TestCase):
     def test_codex_preset_opens_codex_and_keeps_send_navigation(self) -> None:
         bindings = xiaomi_config.codex_button_bindings()
 
-        self.assertEqual(bindings["power"][0]["type"], "command")
+        self.assertEqual(bindings["power"][0]["type"], "helper")
         self.assertEqual(bindings["power"][0]["label"], "打开 Codex")
-        command = bindings["power"][0]["args"][-1]
-        self.assertIn("Get-StartApps", command)
-        self.assertIn("'Codex', 'ChatGPT'", command)
-        self.assertIn("Start-Process 'codex:'", command)
+        self.assertEqual(bindings["power"][0]["args"], ["activate", "codex"])
         self.assertEqual(bindings["ok"][0]["keys"], ["enter"])
         self.assertEqual(bindings["up"][0]["keys"], ["up"])
         self.assertEqual(bindings["down"][0]["keys"], ["down"])
@@ -37,23 +34,14 @@ class XiaomiConfigTests(unittest.TestCase):
         self.assertEqual(bindings["menu"][0]["keys"], ["esc"])
         self.assertEqual(bindings["mic"][0]["keys"], list(xiaomi_config.CODEX_VOICE_HOTKEY))
         self.assertEqual(xiaomi_config.CODEX_VOICE_TRIGGER_MODE, "hold")
-        self.assertEqual(default_config()["voice_trigger_mode"], "hold")
-        self.assertEqual(default_config()["active_preset"], "codex")
-        self.assertEqual(default_keys_config()["button_bindings"]["power"][0]["type"], "command")
-        self.assertEqual(
-            default_keys_config()["button_bindings"]["power"][0]["label"],
-            "打开 Codex",
-        )
+
 
     def test_workbuddy_preset_opens_workbuddy_and_uses_toggle_voice(self) -> None:
         bindings = xiaomi_config.workbuddy_button_bindings()
 
-        self.assertEqual(bindings["power"][0]["type"], "command")
+        self.assertEqual(bindings["power"][0]["type"], "helper")
         self.assertEqual(bindings["power"][0]["label"], "打开 WorkBuddy")
-        command = bindings["power"][0]["args"][-1]
-        self.assertIn("Get-StartApps", command)
-        self.assertIn("'WorkBuddy'", command)
-        self.assertIn("Start-Process 'workbuddy:'", command)
+        self.assertEqual(bindings["power"][0]["args"], ["activate", "workbuddy"])
         self.assertEqual(bindings["mic"][0]["keys"], ["ctrl", "d"])
         self.assertEqual(bindings["ok"][0]["keys"], ["enter"])
         self.assertEqual(bindings["back"][0]["keys"], ["backspace"])
@@ -69,12 +57,9 @@ class XiaomiConfigTests(unittest.TestCase):
     def test_wechat_preset_opens_wechat_and_holds_ctrl_win_for_voice(self) -> None:
         bindings = xiaomi_config.wechat_button_bindings()
 
-        self.assertEqual(bindings["power"][0]["type"], "command")
+        self.assertEqual(bindings["power"][0]["type"], "helper")
         self.assertEqual(bindings["power"][0]["label"], "打开微信")
-        command = bindings["power"][0]["args"][-1]
-        self.assertIn("Get-StartApps", command)
-        self.assertIn("'微信', 'WeChat'", command)
-        self.assertIn("WeChat.exe", command)
+        self.assertEqual(bindings["power"][0]["args"], ["activate", "wechat"])
         self.assertEqual(bindings["mic"][0]["keys"], ["ctrl", "win"])
         self.assertEqual(bindings["ok"][0]["keys"], ["enter"])
         self.assertEqual(bindings["back"][0]["keys"], ["backspace"])
@@ -90,11 +75,9 @@ class XiaomiConfigTests(unittest.TestCase):
     def test_qianwen_preset_opens_qwenwork_and_toggles_right_ctrl(self) -> None:
         bindings = xiaomi_config.qianwen_button_bindings()
 
-        self.assertEqual(bindings["power"][0]["type"], "command")
+        self.assertEqual(bindings["power"][0]["type"], "helper")
         self.assertEqual(bindings["power"][0]["label"], "打开千问办公")
-        command = bindings["power"][0]["args"][-1]
-        self.assertIn("'千问办公', 'QwenWork'", command)
-        self.assertIn("QwenWork.exe", command)
+        self.assertEqual(bindings["power"][0]["args"], ["activate", "qianwen"])
         self.assertEqual(bindings["mic"][0]["keys"], ["rightctrl"])
         self.assertEqual(xiaomi_config.QIANWEN_VOICE_TRIGGER_MODE, "toggle")
         self.assertEqual(
@@ -110,56 +93,61 @@ class XiaomiConfigTests(unittest.TestCase):
             "scan_code",
         )
 
-    def test_cycle_preset_wraps_and_preserves_the_configured_switch_button(self) -> None:
+    def test_agent_preset_matches_every_remote_button(self) -> None:
+        expected = {
+            "power": [{"type": "hotkey", "keys": ["esc"]}],
+            "mic": [{"type": "hotkey", "keys": ["ctrl", "d"]}],
+            "up": [{"type": "helper", "args": ["arrow", "up"]}],
+            "down": [{"type": "helper", "args": ["arrow", "down"]}],
+            "left": [{"type": "helper", "args": ["session", "prev"]}],
+            "right": [{"type": "helper", "args": ["session", "next"]}],
+            "ok": [{"type": "helper", "args": ["ok"]}],
+            "back": [{"type": "hotkey", "keys": ["backspace"], "hold_ms": 20}],
+            "volume_up": [{"type": "helper", "args": ["scroll", "240"]}],
+            "volume_down": [{"type": "helper", "args": ["scroll", "-240"]}],
+            "home": [{"type": "hotkey", "keys": ["leftwin", "d"]}],
+            "menu": [{"type": "helper", "args": ["activate", "claude"]}],
+            "tv": [{"type": "helper", "args": ["activate", "codex"]}],
+        }
+        self.assertEqual(xiaomi_config.agent_button_bindings(), expected)
+        self.assertEqual(default_keys_config()["button_bindings"], expected)
+        self.assertEqual(xiaomi_config.PRESET_ORDER[0], "agent")
         config = default_config()
-        keys = default_keys_config()
-        keys["button_bindings"]["tv"] = [
-            {"type": "preset_cycle", "label": "循环切换预设"}
-        ]
-
-        active = xiaomi_config.cycle_preset_configuration(config, keys)
-
-        self.assertEqual(active, "workbuddy")
-        self.assertEqual(config["active_preset"], "workbuddy")
-        self.assertEqual(config["voice_trigger_mode"], "toggle")
+        self.assertEqual(config["active_preset"], "agent")
         self.assertEqual(config["voice_hotkey"], "ctrl+d")
-        self.assertEqual(
-            keys["button_bindings"]["power"][0]["label"],
-            "打开 WorkBuddy",
-        )
-        self.assertEqual(
-            keys["button_bindings"]["tv"][0]["type"],
-            "preset_cycle",
-        )
-
-        active = xiaomi_config.cycle_preset_configuration(config, keys)
-
-        self.assertEqual(active, "wechat")
-        self.assertEqual(config["voice_trigger_mode"], "hold")
-        self.assertEqual(config["voice_hotkey"], "ctrl+win")
-        self.assertEqual(
-            keys["button_bindings"]["power"][0]["label"],
-            "打开微信",
-        )
-        self.assertEqual(keys["button_bindings"]["tv"][0]["type"], "preset_cycle")
-
-        active = xiaomi_config.cycle_preset_configuration(config, keys)
-
-        self.assertEqual(active, "qianwen")
         self.assertEqual(config["voice_trigger_mode"], "toggle")
-        self.assertEqual(config["voice_hotkey"], "rightctrl")
-        self.assertEqual(
-            keys["button_bindings"]["power"][0]["label"],
-            "打开千问办公",
-        )
-        self.assertEqual(keys["button_bindings"]["tv"][0]["type"], "preset_cycle")
+        self.assertEqual(config["gain_db"], 4.0)
+        self.assertEqual(config["volume_repeat_delay"], 0.40)
+        self.assertEqual(config["volume_repeat_interval"], 0.12)
+        self.assertEqual(config["back_repeat_interval"], 0.04)
 
-        active = xiaomi_config.cycle_preset_configuration(config, keys)
+    def test_new_install_persists_agent_without_a_fixed_app_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = xiaomi_config.load_config(Path(temp_dir) / "xiaomi.json")
+            keys = xiaomi_config.load_keys_config(Path(temp_dir) / "xiaomi_keys.json")
+        self.assertEqual(config["active_preset"], "agent")
+        self.assertEqual(keys["button_bindings"], xiaomi_config.agent_button_bindings())
+        self.assertEqual(keys["preset_bindings"]["agent"], keys["button_bindings"])
+        self.assertNotIn("powershell", json.dumps(keys).casefold())
+        self.assertNotIn("pzs8sxrjxfjjc", json.dumps(keys))
+        self.assertNotIn("2p2nqsd0c76g0", json.dumps(keys))
 
-        self.assertEqual(active, "codex")
-        self.assertEqual(config["voice_trigger_mode"], "hold")
-        self.assertEqual(config["voice_hotkey"], "rightalt")
-        self.assertEqual(keys["button_bindings"]["tv"][0]["type"], "preset_cycle")
+    def test_cycle_preset_wraps_and_preserves_the_configured_switch_button(self) -> None:
+        config, keys = default_config(), default_keys_config()
+        keys["button_bindings"]["tv"] = [{"type": "preset_cycle", "label": "循环切换预设"}]
+        for preset, hotkey, mode in (
+            ("codex", "rightalt", "hold"),
+            ("workbuddy", "ctrl+d", "toggle"),
+            ("wechat", "ctrl+win", "hold"),
+            ("qianwen", "rightctrl", "toggle"),
+            ("agent", "ctrl+d", "toggle"),
+        ):
+            with self.subTest(preset=preset):
+                self.assertEqual(xiaomi_config.cycle_preset_configuration(config, keys), preset)
+                self.assertEqual(config["active_preset"], preset)
+                self.assertEqual(config["voice_trigger_mode"], mode)
+                self.assertEqual(config["voice_hotkey"], hotkey)
+                self.assertEqual(keys["button_bindings"]["tv"][0]["type"], "preset_cycle")
 
     def test_custom_preset_is_available_and_cycles_with_its_voice_settings(self) -> None:
         config = default_config()
@@ -193,7 +181,7 @@ class XiaomiConfigTests(unittest.TestCase):
         keys["button_bindings"]["volume_up"] = [
             {"type": "hotkey", "keys": ["ctrl", "z"]}
         ]
-        xiaomi_config.apply_preset_configuration(config, keys, "codex")
+        xiaomi_config.apply_preset_configuration(config, keys, "agent")
 
         self.assertEqual(
             keys["button_bindings"]["menu"][0]["keys"], ["f8"]

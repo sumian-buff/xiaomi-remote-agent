@@ -8,7 +8,7 @@ import sys
 
 
 SOURCE_ROOT = Path(__file__).resolve().parent
-HUB_SCRIPT = SOURCE_ROOT / "remote_bridge_hub.py"
+ENTRY_SCRIPT = SOURCE_ROOT / "standalone" / "xiaomi_main.py"
 
 
 def is_frozen() -> bool:
@@ -32,7 +32,7 @@ def role_command(
     """Return a command for an internal worker or settings role.
 
     A packaged customer build relaunches its own executable. Source-mode runs
-    relaunch the hub script with the current interpreter, which keeps local
+    relaunch the Xiaomi entry script with the current interpreter, which keeps local
     development and package behavior on the same dispatch path.
     """
 
@@ -43,5 +43,5 @@ def role_command(
     command = [str(Path(sys.executable).resolve())]
     if unbuffered:
         command.append("-u")
-    command.extend((str(HUB_SCRIPT), *role_arguments))
+    command.extend((str(ENTRY_SCRIPT), *role_arguments))
     return command
