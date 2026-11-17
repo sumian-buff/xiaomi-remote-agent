@@ -57,7 +57,7 @@ Claude 和 Codex 的听写快捷键都是「长按 Ctrl+D」；实测用 `toggle
 | 上 / 下 | `helper: arrow up` / `helper: arrow down` |
 | 左 / 右 | `helper: session prev` / `helper: session next` |
 | 音量 + / − | `helper: scroll 240` / `helper: scroll -240`（必须保留上游的音量键长按连发） |
-| 主页 | 热键 `leftwin+d` |
+| 主页 | `helper: new`：新建会话。Claude 发 Ctrl+N（它「新建」按钮的 AcceleratorKey），然后聚焦新输入框；Codex 没有公开快捷键，用 UIA 点名称为「新聊天」/ New chat 的按钮。`remote-helper.json` 里各应用的 `newSession` 可以覆盖 |
 
 AUMID 不要写死：启动时枚举 `shell:AppsFolder`（或读取开始菜单应用列表），找名称为 Claude、AppID 形如 `Claude_*!Claude` 的项，以及 AppID 形如 `OpenAI.Codex_*!App` 的项（Codex 在开始菜单里叫 ChatGPT）。
 **一律用 AppID 启动，绝对不要用开始菜单的 `.lnk` 快捷方式**：应用更新后，旧快捷方式会指向已删除的版本文件夹，弹出「快捷方式存在问题」。
@@ -107,7 +107,7 @@ Claude 的听写使用 Windows 默认录音设备。在「环境检查」里增�
 | 上 / 下 | 有选项卡片时第一下进入卡片，之后在选项间移动；没有卡片时是普通方向键 |
 | 左 / 右 | Claude：输入框为空时点回复末尾建议框的第一个 / 第二个按钮；Codex：上一个 / 下一个会话 |
 | 音量 + / − | 滚动对话，鼠标不在对话区时自动移过去；按住连续滚 |
-| 返回 / 主页 | 退格（按住连删）/ 显示桌面 |
+| 返回 / 主页 | 退格（按住连删）/ 在当前应用里新建会话 |
 | 启动 / 开机自启 | 不弹任何黑框；遥控器休眠唤醒后自动重连 |
 
 ## 4. 已知的坑（都在真机上遇到过，remote-helper.cs 已处理，改动时不要破坏）

@@ -5,6 +5,8 @@
 //   remote-helper.exe session prev|next  left/right keys: previous/next session in the active app, using that
 //                                        app's shortcut from remote-helper.json; plain Left/Right if it has none
 //   remote-helper.exe scroll <delta>     volume keys: scroll the conversation under an auto-placed cursor
+//   remote-helper.exe new                Home key: new session/chat in the active app (its "newSession" shortcut
+//                                        from remote-helper.json, else press its 新聊天 / New chat button)
 //   remote-helper.exe apps <json-path>   enumerate installed app names and AppIDs without launching them
 //   remote-helper.exe shortcut <lnk> <AUMID>  (re)create a .lnk that points at the app itself, so its
 //                                        icon and target follow app updates
@@ -41,6 +43,7 @@ static class Helper
                 case "session": Session(cfg, args[1].ToLowerInvariant() == "prev"); return 0;
                 case "arrow": Arrow(args[1].ToLowerInvariant() == "up"); return 0;
                 case "ok": Ok(); return 0;
+                case "new": NewSession(cfg); return 0;
                 case "scroll": Scroll(cfg, args.Length > 1 ? int.Parse(args[1]) : cfg.scrollDelta); return 0;
                 case "apps":
                     if (args.Length != 2) return 2;
@@ -117,6 +120,51 @@ static class Helper
         AppKeys keys = KeysFor(cfg, ProcessPath(fg));
         string combo = keys == null ? null : (prev ? keys.prev : keys.next);
         SendCombo(string.IsNullOrEmpty(combo) ? (prev ? "left" : "right") : combo);
+    }
+
+    // Home key: start a new session in the active app.
+    //   Claude: Ctrl+N (the accelerator of its 新建 button), then put the cursor in the new prompt box.
+    //   Codex:  it exposes no shortcut for this, so press its 新聊天 (New chat) button via UI Automation.
+    // An app's "newSession" entry in remote-helper.json overrides both.
+    static readonly string[] NewChatButtonNames = { "新聊天", "New chat", "新线程", "New thread" };
+
+    static void NewSession(Settings cfg)
+    {
+        IntPtr fg = GetForegroundWindow();
+        bool claude = IsClaude(fg);
+        AppKeys keys = KeysFor(cfg, ProcessPath(fg));
+        string combo = keys == null ? null : keys.newSession;
+        if (string.IsNullOrEmpty(combo) && claude) combo = "ctrl+n";
+        if (!string.IsNullOrEmpty(combo)) SendCombo(combo);
+        else if (!InvokeButtonNamed(fg, NewChatButtonNames)) return;
+        if (claude)
+        {
+            Thread.Sleep(700);   // let the new session open, then focus its prompt box
+            try { FocusClaudePrompt(fg); } catch { }
+        }
+    }
+
+    static bool InvokeButtonNamed(IntPtr hwnd, string[] names)
+    {
+        var root = AutomationElement.FromHandle(hwnd);
+        var cache = new CacheRequest();
+        cache.Add(AutomationElement.NameProperty);
+        cache.AutomationElementMode = AutomationElementMode.Full;
+        AutomationElement hit = null;
+        using (cache.Activate())
+        {
+            var buttons = root.FindAll(TreeScope.Descendants,
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button));
+            foreach (AutomationElement b in buttons)
+            {
+                if (Array.IndexOf(names, (b.Cached.Name ?? "").Trim()) >= 0) { hit = b; break; }   // first = top of the sidebar
+            }
+        }
+        if (hit == null) return false;
+        object ip;
+        if (hit.TryGetCurrentPattern(InvokePattern.Pattern, out ip)) ((InvokePattern)ip).Invoke();
+        else { hit.SetFocus(); Thread.Sleep(50); SendCombo("enter"); }
+        return true;
     }
 
     // Up/Down. In Claude, a question or approval card does not take keyboard focus: it stays in the
@@ -463,7 +511,7 @@ static class Helper
 
     // ---------- settings ----------
 
-    public class AppKeys { public string name; public string match; public string prev; public string next; }
+    public class AppKeys { public string name; public string match; public string prev; public string next; public string newSession; }
     public class Settings
     {
         public int scrollDelta = 240;
@@ -478,8 +526,8 @@ static class Helper
             var js = new JavaScriptSerializer();
             if (File.Exists(path)) return js.Deserialize<Settings>(File.ReadAllText(path, Encoding.UTF8));
             var s = new Settings();
-            s.apps.Add(new AppKeys { name = "Codex", match = "\\OpenAI.Codex_", prev = "ctrl+shift+f1", next = "ctrl+shift+f2" });
-            s.apps.Add(new AppKeys { name = "Claude", match = "\\Claude_", prev = "", next = "" });
+            s.apps.Add(new AppKeys { name = "Codex", match = "\\OpenAI.Codex_", prev = "ctrl+shift+f1", next = "ctrl+shift+f2", newSession = "" });
+            s.apps.Add(new AppKeys { name = "Claude", match = "\\Claude_", prev = "", next = "", newSession = "ctrl+n" });
             File.WriteAllText(path, Pretty(js.Serialize(s)), new UTF8Encoding(false));
             return s;
         }

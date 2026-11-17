@@ -21,7 +21,7 @@ from bridges.xiaomi.xiaomi_config import agent_button_bindings
 class HelperArgumentTests(unittest.TestCase):
     def test_supported_actions_preserve_argument_boundaries(self) -> None:
         for args in (
-            ["ok"], ["arrow", "up"], ["arrow", "down"],
+            ["ok"], ["new"], ["arrow", "up"], ["arrow", "down"],
             ["session", "prev"], ["session", "next"],
             ["scroll", "240"], ["scroll", "-240"],
         ):

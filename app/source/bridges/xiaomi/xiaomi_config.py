@@ -215,7 +215,7 @@ def agent_button_bindings() -> dict:
         "down": [{"type": "helper", "args": ["arrow", "down"]}],
         "back": [{"type": "hotkey", "keys": ["backspace"], "hold_ms": 20}],
         "volume_up": [{"type": "helper", "args": ["scroll", "240"]}],
-        "home": [{"type": "hotkey", "keys": ["leftwin", "d"]}],
+        "home": [{"type": "helper", "args": ["new"]}],
         "volume_down": [{"type": "helper", "args": ["scroll", "-240"]}],
         "menu": [{"type": "helper", "args": ["activate", "claude"]}],
         "tv": [{"type": "helper", "args": ["activate", "codex"]}],

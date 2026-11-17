@@ -105,7 +105,7 @@ class XiaomiConfigTests(unittest.TestCase):
             "back": [{"type": "hotkey", "keys": ["backspace"], "hold_ms": 20}],
             "volume_up": [{"type": "helper", "args": ["scroll", "240"]}],
             "volume_down": [{"type": "helper", "args": ["scroll", "-240"]}],
-            "home": [{"type": "hotkey", "keys": ["leftwin", "d"]}],
+            "home": [{"type": "helper", "args": ["new"]}],
             "menu": [{"type": "helper", "args": ["activate", "claude"]}],
             "tv": [{"type": "helper", "args": ["activate", "codex"]}],
         }

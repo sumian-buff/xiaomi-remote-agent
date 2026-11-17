@@ -12,7 +12,7 @@ def parse_helper_args(action: dict) -> list[str]:
     ):
         raise ValueError("helper 动作需要非空字符串参数列表")
     command, *values = args
-    if command == "ok" and not values:
+    if command in ("ok", "new") and not values:
         return list(args)
     if command == "arrow" and values in (["up"], ["down"]):
         return list(args)
