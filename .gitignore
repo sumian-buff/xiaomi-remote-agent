@@ -8,3 +8,12 @@ publish/
 backup*/
 remote-helper.json
 arm.state
+
+.venv/
+__pycache__/
+*.pyc
+dist/
+build/
+*.dll.xz
+delivery/vendor/
+
