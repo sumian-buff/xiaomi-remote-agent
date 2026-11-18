@@ -90,6 +90,31 @@ XIAOMI_2_PRO_HARDWARE_TOKEN = "dev_vid&012717_pid&32b8"
 # again (verified 2026-11-17), so continuing is impossible on this remote. Kept for
 # remotes that do stream on host request; enable with XIAOMI_REMOTE_AGENT_AUTO_CONTINUE=1.
 AUTO_CONTINUE_ENABLED = os.environ.get("XIAOMI_REMOTE_AGENT_AUTO_CONTINUE", "0") == "1"
+# Two short beeps on the default playback device this many seconds into a held voice
+# segment, before the remote's own ~60 s limit cuts it off. 0 disables.
+try:
+    VOICE_LIMIT_WARN_S = float(os.environ.get("XIAOMI_REMOTE_AGENT_LIMIT_WARN_S", "55"))
+except ValueError:
+    VOICE_LIMIT_WARN_S = 55.0
+
+
+def play_limit_warning() -> None:
+    """Beep twice without blocking the voice loop (winsound plays on the default
+    output device, not on the virtual CABLE microphone)."""
+
+    def beep() -> None:
+        try:
+            import winsound
+
+            winsound.Beep(1400, 120)
+            time.sleep(0.08)
+            winsound.Beep(1400, 120)
+        except Exception as exc:  # never let a missing sound device break dictation
+            print(f"LIMIT WARNING beep failed: {type(exc).__name__}: {exc}", flush=True)
+
+    threading.Thread(target=beep, name="voice-limit-beep", daemon=True).start()
+
+
 AUTO_CONTINUE_MIN_SEGMENT_S = 59.0   # a segment this long was cut by the remote's limit
 AUTO_CONTINUE_MAX = 4                # at most ~5 minutes in one hold
 AUTO_CONTINUE_WAIT_S = 1.5           # give up if the remote does not restart audio
@@ -1428,6 +1453,7 @@ async def bridge_once(
         last_voice_at = 0.0
         noise_floor = 0.0
         ignore_stop_until = 0.0
+        limit_warned = False
 
         async def close_continuation(reason: str) -> None:
             nonlocal streaming, in_continuation, ignore_stop_until
@@ -1470,6 +1496,17 @@ async def bridge_once(
                 continuing_until = None
                 print("AUTO CONTINUE no AUDIO_START from remote; ending dictation", flush=True)
                 await end_voice("auto_continue_failed")
+            if (
+                VOICE_LIMIT_WARN_S > 0
+                and streaming
+                and not limit_warned
+                and not in_continuation
+                and segment_started_at is not None
+                and time.monotonic() - segment_started_at >= VOICE_LIMIT_WARN_S
+            ):
+                limit_warned = True
+                play_limit_warning()
+                print(f"LIMIT WARNING at {VOICE_LIMIT_WARN_S:.0f}s; the remote stops at ~60s", flush=True)
             if (
                 in_continuation
                 and streaming
@@ -1514,6 +1551,7 @@ async def bridge_once(
                     streaming = True
                     last_mic_off_at = None
                     segment_started_at = time.monotonic()
+                    limit_warned = False
                     session_id = payload[3] if len(payload) >= 4 else None
                     print(f"AUDIO_START payload={payload.hex('-')}", flush=True)
                     pending.clear()

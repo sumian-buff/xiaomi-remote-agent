@@ -17,7 +17,7 @@ APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / os.environ.get(
 CONFIG_PATH = APPDATA / "xiaomi.json"
 KEYS_CONFIG_PATH = APPDATA / "xiaomi_keys.json"
 
-APP_VERSION = "0.1.23"
+APP_VERSION = "0.1.24"
 APP_VERSION = os.environ.get("XIAOMI_REMOTE_AGENT_XIAOMI_VERSION", APP_VERSION)
 MAPPING_SCHEMA_VERSION = 3
 
