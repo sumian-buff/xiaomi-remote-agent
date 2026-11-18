@@ -122,3 +122,6 @@ Claude 的听写使用 Windows 默认录音设备。在「环境检查」里增�
 - Claude 回复末尾的建议框：第一个按钮的 AcceleratorKey 是 `Control+Enter`。
 - 从 Claude 桌面版内置终端（MSIX 容器）里启动的进程，`%APPDATA%` 会被重定向。正式启动本程序要靠资源管理器、开始菜单或开机自启，不要靠 WMI。
 - Codex 的快捷键设置不接受「三个修饰键 + F 键」的组合。
+- **单次语音会话上限约 60 秒（RC003 固件，2026-11-17 实测）**：按住超过约 59.9 秒，遥控器自己发 AUDIO_STOP，停止原因有时是 `00-08`、有时是 `00-02`（松手也是 `00-02`）。
+  MIC_EXTEND（`0E <stream id>`）能写入但被忽略；超时后主机再发 MIC_OPEN，遥控器会回 AUDIO_START（`04-00-02-00`），但**不发任何音频**，直到用户重新按键；这种主机打开的会话在松手时也不发任何事件。
+  所以在这款遥控器上无法延长或无缝续录。`atvv_live_bridge.py` 里的自动续录代码默认关闭（环境变量 `XIAOMI_REMOTE_AGENT_AUTO_CONTINUE=1` 打开），留给可能支持的其他遥控器。日志里的 `AUDIO_START` / `AUDIO_STOP payload=` 行记录了原始数据，方便以后排查。
