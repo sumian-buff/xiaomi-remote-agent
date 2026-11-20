@@ -124,5 +124,5 @@ Claude 的听写使用 Windows 默认录音设备。在「环境检查」里增�
 - Codex 的快捷键设置不接受「三个修饰键 + F 键」的组合。
 - **单次语音会话上限约 60 秒（RC003 固件，2026-11-17 实测）**：按住超过约 59.9 秒，遥控器自己发 AUDIO_STOP，停止原因有时是 `00-08`、有时是 `00-02`（松手也是 `00-02`）。
   MIC_EXTEND（`0E <stream id>`）能写入但被忽略；超时后主机再发 MIC_OPEN，遥控器会回 AUDIO_START（`04-00-02-00`），但**不发任何音频**，直到用户重新按键；这种主机打开的会话在松手时也不发任何事件。
-  所以在这款遥控器上无法延长或无缝续录。`atvv_live_bridge.py` 里的自动续录代码默认关闭（环境变量 `XIAOMI_REMOTE_AGENT_AUTO_CONTINUE=1` 打开），留给可能支持的其他遥控器。日志里的 `AUDIO_START` / `AUDIO_STOP payload=` 行记录了原始数据，方便以后排查。
-  作为替代，按住满 `VOICE_LIMIT_WARN_S`（默认 55 秒，环境变量 `XIAOMI_REMOTE_AGENT_LIMIT_WARN_S`，0 关闭）时用 `winsound.Beep` 在默认播放设备上响两声（另开线程，不阻塞语音循环，不进 CABLE），日志 `LIMIT WARNING`。
+  这款遥控器需要用户松手再按下才能开始下一段收音。电脑端可以在两段之间保持同一次听写。`atvv_live_bridge.py` 里尝试由电脑主动重新开麦的实验代码默认关闭。日志里的 `AUDIO_START` / `AUDIO_STOP payload=` 行记录了遥控器事件。
+  按住满 `VOICE_LIMIT_WARN_S`（默认 55 秒，环境变量 `XIAOMI_REMOTE_AGENT_LIMIT_WARN_S`）时用 `winsound.Beep` 在默认播放设备上响两声，日志 `LIMIT WARNING`。听到提示后松手，给用户 1 秒重新按住语音键。续上时保留听写快捷键和音频输出会话，重置遥控器的分段解码状态并重新计时。短句松手即结束。

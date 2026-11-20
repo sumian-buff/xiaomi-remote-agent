@@ -86,7 +86,7 @@ XIAOMI_2_PRO_HARDWARE_TOKEN = "dev_vid&012717_pid&32b8"
 # Auto-continue long dictation past the remote's ~60 s per-segment limit.
 # OFF by default: on the RC003 the firmware accepts the host's MIC_OPEN after its own
 # timeout and even answers AUDIO_START, but sends no audio until the button is pressed
-# again (verified 2026-11-17), so continuing is impossible on this remote. Kept for
+# again (verified 2026-11-17), so a physical re-press is needed. Kept for
 # remotes that do stream on host request; enable with XIAOMI_REMOTE_AGENT_AUTO_CONTINUE=1.
 AUTO_CONTINUE_ENABLED = os.environ.get("XIAOMI_REMOTE_AGENT_AUTO_CONTINUE", "0") == "1"
 # Two short beeps on the default playback device this many seconds into a held voice
@@ -95,6 +95,10 @@ try:
     VOICE_LIMIT_WARN_S = float(os.environ.get("XIAOMI_REMOTE_AGENT_LIMIT_WARN_S", "55"))
 except ValueError:
     VOICE_LIMIT_WARN_S = 55.0
+
+MANUAL_CONTINUE_GRACE_S = 1.0
+# A timely physical press may precede the remote's AUDIO_START notification.
+MANUAL_CONTINUE_START_TIMEOUT_S = 1.5
 
 
 def play_limit_warning() -> None:
@@ -988,7 +992,7 @@ class XiaomiGattHidSession:
         return 0, 0
 
     @classmethod
-    async def open(cls, device, events: asyncio.Queue[tuple[str, bytes]]):
+    async def open(cls, device, events: asyncio.Queue[tuple[str, bytes, float]]):
         service = None
         try:
             services_result = await device.get_gatt_services_with_cache_mode_async(
@@ -1051,7 +1055,7 @@ class XiaomiGattHidSession:
                     payload = buffer_bytes(args.characteristic_value)
                     loop.call_soon_threadsafe(
                         events.put_nowait,
-                        (f"hid:{current_report_id}", payload),
+                        (f"hid:{current_report_id}", payload, time.monotonic()),
                     )
 
                 token = characteristic.add_value_changed(handler)
@@ -1388,6 +1392,20 @@ async def bridge_once(
     session_id: int | None = None
     mic_opened = False
     voice_shortcut = VoiceShortcut(voice_hotkey, voice_shortcut_enabled)
+    dictation_active = False
+
+    def finish_dictation() -> None:
+        nonlocal dictation_active
+        if output is not None:
+            output.end_session()
+        stop_toggle = dictation_active and voice_trigger_mode == "toggle" and voice_shortcut.enabled
+        dictation_active = False
+        try:
+            if stop_toggle:
+                voice_shortcut.tap()
+                print("VOICE TOGGLE STOP submit=true", flush=True)
+        finally:
+            voice_shortcut.release()
 
     try:
         service, chars = await discover_atvv(device)
@@ -1396,12 +1414,12 @@ async def bridge_once(
         audio = chars[VOICE_AUDIO_UUID]
         control = chars[VOICE_CONTROL_UUID]
         loop = asyncio.get_running_loop()
-        events: asyncio.Queue[tuple[str, bytes]] = asyncio.Queue()
+        events: asyncio.Queue[tuple[str, bytes, float]] = asyncio.Queue()
 
         def make_handler(channel: str):
             def handler(_sender, args):
                 payload = buffer_bytes(args.characteristic_value)
-                loop.call_soon_threadsafe(events.put_nowait, (channel, payload))
+                loop.call_soon_threadsafe(events.put_nowait, (channel, payload, time.monotonic()))
 
             return handler
 
@@ -1459,6 +1477,20 @@ async def bridge_once(
         noise_floor = 0.0
         ignore_stop_until = 0.0
         limit_warned = False
+        manual_deadline: float | None = None
+        manual_press_received = False
+        manual_continuations = 0
+
+        def resume_physical_segment(pressed_at: float) -> None:
+            nonlocal streaming, segment_started_at, limit_warned, manual_continuations, pending_sync
+            manual_continuations += 1
+            streaming = True
+            segment_started_at = pressed_at
+            limit_warned = False
+            pending.clear()
+            pending_sync = None
+            decoder.reset(0, 0)
+            print(f"MANUAL CONTINUE resumed n={manual_continuations}", flush=True)
 
         async def close_continuation(reason: str) -> None:
             nonlocal streaming, in_continuation, ignore_stop_until
@@ -1472,18 +1504,14 @@ async def bridge_once(
             pending.clear()
             await end_voice(reason)
 
-        async def end_voice(reason: str) -> None:
+        async def end_voice(reason: str, *, drain: bool = True) -> None:
             nonlocal last_mic_off_at, in_continuation
             in_continuation = False
             # Let final decoded packets clear the virtual cable before
             # stopping the active voice-input session.
-            await asyncio.sleep(0.12)
-            output.end_session()
-            if voice_trigger_mode == "toggle" and voice_shortcut.enabled:
-                voice_shortcut.tap()
-                print("VOICE TOGGLE STOP submit=true", flush=True)
-            else:
-                voice_shortcut.release()
+            if drain:
+                await asyncio.sleep(0.12)
+            finish_dictation()
             session_result = session_stats.summary(sample_rate)
             last_mic_off_at = time.monotonic()
             print(
@@ -1492,7 +1520,8 @@ async def bridge_once(
                 f"peak={session_result['peak']} rms={session_result['rms']:.1f} "
                 f"sent={output.sent_packets - session_sent_start} "
                 f"send_drop={output.dropped_chunks - session_drop_start} "
-                f"result={session_result['result']} continuations={continuations} end={reason}",
+                f"result={session_result['result']} continuations={continuations} "
+                f"manual_continuations={manual_continuations} end={reason}",
                 flush=True,
             )
 
@@ -1519,12 +1548,32 @@ async def bridge_once(
             ):
                 print(f"AUTO CONTINUE silence {AUTO_CONTINUE_SILENCE_S:.1f}s; ending dictation", flush=True)
                 await close_continuation("silence")
+            # Compare notification arrival times, even if a GATT write or audio processing
+            # delayed consumption. Drain events already queued before expiring a re-press.
+            timeout = 0.5
+            if manual_deadline is not None:
+                timeout = min(timeout, max(0.0, manual_deadline - time.monotonic()))
             try:
-                channel, payload = await asyncio.wait_for(events.get(), timeout=0.5)
+                if events.empty():
+                    event = await asyncio.wait_for(events.get(), timeout=timeout)
+                else:
+                    event = events.get_nowait()
             except asyncio.TimeoutError:
+                # A notification can be queued as wait_for cancels its waiter.
+                event = None if events.empty() else events.get_nowait()
+            event_at = event[2] if event is not None else time.monotonic()
+            if manual_deadline is not None and event_at >= manual_deadline:
+                manual_deadline = None
+                manual_press_received = False
+                streaming = False
+                segment_started_at = None
+                pending.clear()
+                await end_voice("repress_timeout", drain=False)
+            if event is None:
                 if int(device.connection_status) == 0:
                     raise ConnectionError("remote disconnected")
                 continue
+            channel, payload, _ = event
 
             if channel == "control":
                 if not payload:
@@ -1550,17 +1599,43 @@ async def bridge_once(
                         print("AUTO CONTINUE mic pressed; ending dictation", flush=True)
                         await close_continuation("button")
                         continue
-                    await write_command(tx, bytes((0x0C, 0x00)), "MIC_OPEN")
+                    if manual_deadline is not None:
+                        if manual_press_received:
+                            continue
+                        manual_press_received = True
+                        manual_deadline = event_at + MANUAL_CONTINUE_START_TIMEOUT_S
+                        await asyncio.wait_for(
+                            write_command(tx, bytes((0x0C, 0x00)), "MIC_OPEN"),
+                            timeout=MANUAL_CONTINUE_START_TIMEOUT_S,
+                        )
+                    else:
+                        await write_command(tx, bytes((0x0C, 0x00)), "MIC_OPEN")
                     mic_opened = True
                 elif opcode == 0x04:
                     if special_keys is not None:
                         special_keys.mark_voice_signal()
+                    new_session_id = payload[3] if len(payload) >= 4 else None
+                    print(f"AUDIO_START payload={payload.hex('-')}", flush=True)
+                    if manual_deadline is not None:
+                        if session_id is not None and new_session_id == session_id and not manual_press_received:
+                            continue  # a repeated start for the already released segment
+                        manual_deadline = None
+                        manual_press_received = False
+                        session_id = new_session_id
+                        if not streaming:
+                            resume_physical_segment(event_at)
+                        continue
+                    if streaming and dictation_active and continuing_until is None:
+                        # Duplicate START, or confirmation after a resumed segment's
+                        # first audio arrived early. Its decoder and timer are live.
+                        if session_id is None or new_session_id == session_id:
+                            session_id = new_session_id
+                            continue
                     streaming = True
                     last_mic_off_at = None
-                    segment_started_at = time.monotonic()
+                    segment_started_at = event_at
                     limit_warned = False
-                    session_id = payload[3] if len(payload) >= 4 else None
-                    print(f"AUDIO_START payload={payload.hex('-')}", flush=True)
+                    session_id = new_session_id
                     pending.clear()
                     # RC003 restarts its encoder at predictor/index 0 for each
                     # physical HTT session but sends no AUDIO_SYNC packet.
@@ -1575,8 +1650,9 @@ async def bridge_once(
                         in_continuation = True
                         last_voice_at = time.monotonic()
                         print(f"AUTO CONTINUE started n={continuations} session={session_id}", flush=True)
-                    else:
+                    elif not dictation_active:
                         continuations = 0
+                        manual_continuations = 0
                         in_continuation = False
                         output.clear()
                         session_stats.reset()
@@ -1587,23 +1663,24 @@ async def bridge_once(
                             print("VOICE TOGGLE START", flush=True)
                         else:
                             voice_shortcut.press()
+                        dictation_active = True
                         print(f"MIC ON session={session_id}", flush=True)
                 elif opcode == 0x00:
-                    streaming = False
-                    pending.clear()
-                    segment_s = (
-                        time.monotonic() - segment_started_at if segment_started_at is not None else 0.0
-                    )
-                    segment_started_at = None
-                    # Second byte is the stop reason: 02 = button released, 08 = the
-                    # remote's own ~60 s limit.
-                    print(f"AUDIO_STOP payload={payload.hex('-')} segment_s={segment_s:.1f}", flush=True)
                     if time.monotonic() < ignore_stop_until:
                         print("AUDIO_STOP ignored (answer to MIC_CLOSE)", flush=True)
                         continue
                     if continuing_until is not None:
                         print("AUDIO_STOP ignored (stray stop while auto-continue is starting)", flush=True)
                         continue
+                    if not streaming:
+                        continue  # duplicate STOP; never end or extend a pending wait
+                    manual_deadline = None
+                    manual_press_received = False
+                    streaming = False
+                    pending.clear()
+                    segment_s = event_at - segment_started_at if segment_started_at is not None else 0.0
+                    segment_started_at = None
+                    print(f"AUDIO_STOP payload={payload.hex('-')} segment_s={segment_s:.1f}", flush=True)
                     stop_reason = payload[1] if len(payload) >= 2 else None
                     # The firmware reports its ~60 s limit sometimes as 08 and sometimes
                     # as 02 (seen both at 59.9 s), so a full-length segment also counts.
@@ -1625,6 +1702,11 @@ async def bridge_once(
                             continue
                         except Exception as exc:
                             print(f"AUTO CONTINUE failed: {type(exc).__name__}: {exc}", flush=True)
+                    if dictation_active and limit_warned and stop_reason in (None, 0x02, 0x08):
+                        manual_deadline = event_at + MANUAL_CONTINUE_GRACE_S
+                        manual_press_received = False
+                        print(f"MANUAL CONTINUE waiting {MANUAL_CONTINUE_GRACE_S:.2f}s", flush=True)
+                        continue
                     await end_voice("remote_stop")
                 elif opcode == 0x0A and len(payload) >= 7:
                     predictor = int.from_bytes(payload[4:6], "big", signed=True)
@@ -1641,6 +1723,13 @@ async def bridge_once(
                 special_keys.handle_direct_hid_report(report_id, payload)
                 continue
 
+            if manual_deadline is not None and not streaming:
+                if not manual_press_received:
+                    continue  # trailing audio from the released segment
+                # Keep the handshake deadline until AUDIO_START. One stale packet
+                # from the previous press must not leave the hotkey held indefinitely.
+                session_id = None
+                resume_physical_segment(event_at)
             if not streaming and continuing_until is not None:
                 # Audio of an auto-continued segment arrived before its AUDIO_START:
                 # keep streaming into the same dictation.
@@ -1699,7 +1788,10 @@ async def bridge_once(
     finally:
         if special_keys is not None:
             special_keys.reset_direct_hid_state()
-        voice_shortcut.release()
+        if dictation_active:
+            finish_dictation()
+        else:
+            voice_shortcut.release()
         if mic_opened and service is not None:
             try:
                 close_id = session_id or 0

@@ -26,7 +26,7 @@ from process_utils import CREATE_NO_WINDOW, hidden_startupinfo
 
 
 APP_NAME = "Xiaomi Remote Agent"
-APP_VERSION = "0.1.25"
+APP_VERSION = "0.1.26"
 APP_ID = "XiaomiRemoteAgent"
 CONTROL_PORT = 32690
 
@@ -659,10 +659,10 @@ class XiaomiApp:
             (
                 "3",
                 "选择一个预设",
-                "默认选择“Claude + Codex”：语音 Ctrl+D、开关型、增益 4 dB。也可保存自定义预设。",
+                "“Claude + Codex”预设使用长按 Ctrl+D 听写，默认增益 4 dB。也可保存自定义预设。",
             ),
-            ("4", "核对输入法快捷键", "Claude 和 Codex 的听写快捷键应为 Ctrl+D 开关型。本程序在麦克风按下与松开时各轻点一次。Codex 麦克风选 CABLE Output，上一项/下一项会话绑定 Ctrl+Shift+F1/F2。"),
-            ("5", "完成一次真实测试", "把光标放进文本框，按住遥控器原生麦克风键说完整一句话，松开后等待文字出现。"),
+            ("4", "核对输入法快捷键", "Claude 和 Codex 的听写快捷键应设为长按 Ctrl+D。Codex 麦克风选 CABLE Output，上一项/下一项会话绑定 Ctrl+Shift+F1/F2。"),
+            ("5", "试用听写", "把光标放进输入框，按住语音键说话，说完松手。长句听到两声提示后，停一下，松手并在 1 秒内重新按住，就能接着同一次听写。"),
         )
         for number, title, detail in steps:
             card = tk.Frame(
