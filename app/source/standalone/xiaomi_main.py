@@ -59,8 +59,26 @@ LOG_DIR = APPDATA / "logs"
 HOST_LOG = LOG_DIR / "host.log"
 
 
+LOG_MAX_BYTES = 2 * 1024 * 1024
+
+
+def rotate_log(path: Path, max_bytes: int | None = None) -> None:
+    """Keep one previous copy once a log grows past max_bytes.
+
+    Worker logs are only reopened when a worker starts, so they are rotated
+    there; a file still held open by another process is left alone.
+    """
+    try:
+        if path.stat().st_size <= (LOG_MAX_BYTES if max_bytes is None else max_bytes):
+            return
+        path.replace(path.with_name(path.name + ".1"))
+    except OSError:
+        pass
+
+
 def log(message: str) -> None:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
+    rotate_log(HOST_LOG)
     with HOST_LOG.open("a", encoding="utf-8") as stream:
         stream.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}\n")
 
@@ -94,19 +112,23 @@ class XiaomiWorkers:
     @staticmethod
     def _spawn(role: str, arguments: list[str], log_path: Path) -> subprocess.Popen:
         LOG_DIR.mkdir(parents=True, exist_ok=True)
+        rotate_log(log_path)
         stream = log_path.open("a", encoding="utf-8")
         child_environment = os.environ.copy()
         child_environment["PYTHONUTF8"] = "1"
         child_environment["PYTHONIOENCODING"] = "utf-8"
-        return subprocess.Popen(
-            role_command(role, arguments, unbuffered=True),
-            cwd=str(Path(sys.executable).resolve().parent),
-            stdout=stream,
-            stderr=subprocess.STDOUT,
-            env=child_environment,
-            creationflags=CREATE_NO_WINDOW,
-            startupinfo=hidden_startupinfo(),
-        )
+        # The child gets its own duplicate of the handle; closing ours avoids
+        # leaking one per restart and lets the next rotate_log rename the file.
+        with stream:
+            return subprocess.Popen(
+                role_command(role, arguments, unbuffered=True),
+                cwd=str(Path(sys.executable).resolve().parent),
+                stdout=stream,
+                stderr=subprocess.STDOUT,
+                env=child_environment,
+                creationflags=CREATE_NO_WINDOW,
+                startupinfo=hidden_startupinfo(),
+            )
 
     @staticmethod
     def _stop(process: subprocess.Popen | None) -> None:

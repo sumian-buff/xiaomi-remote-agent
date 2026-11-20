@@ -10,6 +10,7 @@ Applications record the matching ``CABLE Output`` endpoint.
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 import asyncio
 import ctypes
 from ctypes import wintypes
@@ -1376,12 +1377,15 @@ async def bridge_once(
     stop_event: asyncio.Event,
     action_guard: XiaomiTvActionGate,
     special_keys: XiaomiSpecialKeyHook | None,
+    verbose: bool = True,
 ) -> None:
-    print(f"CONNECTING remote={address}", flush=True)
+    if verbose:
+        print(f"CONNECTING remote={address}", flush=True)
     device = await BluetoothLEDevice.from_bluetooth_address_async(address_to_int(address))
     if device is None:
         raise RuntimeError(f"paired BLE device not found: {address}")
-    print(f"CONNECTED remote={device.name}; discovering ATVV", flush=True)
+    if verbose:
+        print(f"CONNECTED remote={device.name}; discovering ATVV", flush=True)
     service = None
     output: UdpPcmOutput | None = None
     audio_token = None
@@ -1847,7 +1851,9 @@ async def run(
         await stop_event.wait()
         return 0
 
+    failures = ReconnectFailureLog()
     while not stop_event.is_set():
+        started = time.monotonic()
         try:
             await bridge_once(
                 args.address,
@@ -1858,18 +1864,53 @@ async def run(
                 stop_event,
                 action_guard,
                 special_keys,
+                verbose=failures.verbose,
             )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            print(f"BRIDGE ERROR {type(exc).__name__}: {exc}", flush=True)
+            failures.record(f"{type(exc).__name__}: {exc}", time.monotonic() - started)
             if args.once:
                 return 2
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=args.retry_delay)
             except asyncio.TimeoutError:
-                print("reconnecting...", flush=True)
+                if failures.verbose:
+                    print("reconnecting...", flush=True)
     return 0
+
+
+class ReconnectFailureLog:
+    """Collapse the identical reconnect failures logged while the remote sleeps.
+
+    A sleeping remote fails GATT discovery every retry; logging each attempt
+    filled bridge.log with thousands of identical four-line blocks.
+    """
+
+    SUMMARY_EVERY = 100
+    # An attempt that lasted this long was a real session, not a retry storm.
+    SESSION_SECONDS = 30.0
+
+    def __init__(self, emit: Callable[[str], None] | None = None) -> None:
+        self._emit = emit or (lambda line: print(line, flush=True))
+        self.last: str | None = None
+        self.repeats = 0
+
+    @property
+    def verbose(self) -> bool:
+        return self.repeats == 0 or self.repeats % self.SUMMARY_EVERY == 0
+
+    def record(self, text: str, elapsed: float) -> None:
+        if text != self.last or elapsed >= self.SESSION_SECONDS:
+            if self.repeats > 1:
+                self._emit(f"BRIDGE ERROR repeated {self.repeats} times: {self.last}")
+            self.last = text
+            self.repeats = 0
+        self.repeats += 1
+        if self.repeats == 1:
+            self._emit(f"BRIDGE ERROR {text}")
+        elif self.repeats % self.SUMMARY_EVERY == 0:
+            self._emit(f"BRIDGE ERROR still failing after {self.repeats} attempts: {text}")
 
 
 def main(argv: list[str] | None = None) -> int:
