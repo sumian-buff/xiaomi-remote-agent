@@ -17,7 +17,7 @@ APPDATA = Path(os.environ.get("APPDATA", str(Path.home()))) / os.environ.get(
 CONFIG_PATH = APPDATA / "xiaomi.json"
 KEYS_CONFIG_PATH = APPDATA / "xiaomi_keys.json"
 
-APP_VERSION = "0.1.24"
+APP_VERSION = "0.1.25"
 APP_VERSION = os.environ.get("XIAOMI_REMOTE_AGENT_XIAOMI_VERSION", APP_VERSION)
 MAPPING_SCHEMA_VERSION = 3
 
@@ -429,6 +429,8 @@ def default_config() -> dict:
         "voice_hotkey": "+".join(DEFAULT_VOICE_HOTKEY),
         "voice_trigger_mode": AGENT_VOICE_TRIGGER_MODE,
         "active_preset": "agent",
+        "input_backend": "legacy",
+        "quarbor_device_instance": "",
         "raw_mapping_enabled": True,
         "tv_action_ready_delay": 2.0,
         "special_key_hook_enabled": True,

@@ -53,7 +53,6 @@ from .xiaomi_config import (
     BUTTON_ALIASES,
     CONFIG_PATH,
     KEYS_CONFIG_PATH,
-    DEFAULT_ADDRESS,
     DEFAULT_VOICE_HOTKEY,
     HOTKEY_VK,
     apply_remote_identity,
@@ -63,12 +62,12 @@ from .xiaomi_config import (
     load_keys_config,
     resolve_hotkey_virtual_keys,
     hotkey_injection_method,
+    normalize_bluetooth_address,
     save_config,
     save_keys_config,
     voice_hotkey_from_configs,
 )
 from .helper_actions import helper_command
-from .hid_report_tap import XiaomiHidReportTap
 from bridges.audio_client import PCM_PORT, ROUTER_HOST
 
 
@@ -770,50 +769,55 @@ class XiaomiSpecialKeyHook:
             pressed = active - self.direct_active_usages
             released = self.direct_active_usages - active
             self.direct_active_usages = active
-
         for usage in sorted(pressed):
-            name = self._direct_name(usage)
-            if name is None:
-                print(f"XIAOMI HID DIRECT usage=0x{usage:04X} ignored", flush=True)
-                continue
-            self._mark_direct_signal(name)
-            # Button mapping must not depend on the ATVV voice connection.
-            # Only TV keeps the short startup guard because that key can emit
-            # one stale report while the HID tap is attaching.
-            action_ready = name != "tv" or self.action_gate.is_ready()
-            if action_ready:
-                triggered = self._send_button_action(name)
-                if triggered and usage == 0xF1:
-                    self._start_back_repeat()
-                elif triggered and usage in (0x80, 0x81):
-                    self._start_volume_repeat(usage, name)
-                elif triggered and self._is_mouse_wheel_action(name):
-                    self._start_mapping_repeat(usage, name)
-                print(
-                    f"XIAOMI HID DIRECT key={name} usage=0x{usage:04X} "
-                    f"mapped={str(triggered).lower()}",
-                    flush=True,
-                )
-            else:
-                print(
-                    f"XIAOMI HID DIRECT key={name} usage=0x{usage:04X} "
-                    "blocked_tv_startup_guard",
-                    flush=True,
-                )
+            self._dispatch_direct_edge(usage, down=True)
         for usage in sorted(released):
-            name = self._direct_name(usage)
-            if name is not None:
-                self._mark_direct_signal(name)
-                if usage == 0xF1:
-                    self._cancel_back_repeat()
-                elif usage in (0x80, 0x81):
-                    self._cancel_volume_repeat()
-                elif self._is_mouse_wheel_action(name):
-                    self._cancel_mapping_repeat()
-                print(
-                    f"XIAOMI HID DIRECT key={name} usage=0x{usage:04X} released",
-                    flush=True,
-                )
+            self._dispatch_direct_edge(usage, down=False)
+
+    def handle_driver_key(self, name: str, down: bool) -> None:
+        # ATVV owns the microphone shortcut for the entire audio session.
+        usage = self.DIRECT_USAGES.get(name)
+        if usage is None or self.stop_event.is_set():
+            return
+        with self.direct_state_lock:
+            if down == (usage in self.direct_active_usages):
+                return
+            if down:
+                self.direct_active_usages.add(usage)
+            else:
+                self.direct_active_usages.remove(usage)
+        self._dispatch_direct_edge(usage, down)
+
+    def _dispatch_direct_edge(self, usage: int, down: bool) -> None:
+        name = self._direct_name(usage)
+        if name is None:
+            if down:
+                print(f"XIAOMI HID DIRECT usage=0x{usage:04X} ignored", flush=True)
+            return
+        self._mark_direct_signal(name)
+        if not down:
+            if usage == 0xF1:
+                self._cancel_back_repeat()
+            elif usage in (0x80, 0x81):
+                self._cancel_volume_repeat()
+            elif self._is_mouse_wheel_action(name):
+                self._cancel_mapping_repeat()
+            print(f"XIAOMI HID DIRECT key={name} usage=0x{usage:04X} released", flush=True)
+            return
+
+        # The legacy HID tap can deliver a stale TV key while attaching.
+        if name == "tv" and not self.action_gate.is_ready():
+            print(f"XIAOMI HID DIRECT key={name} usage=0x{usage:04X} blocked_tv_startup_guard", flush=True)
+            return
+        triggered = self._send_button_action(name)
+        if triggered:
+            if usage == 0xF1:
+                self._start_back_repeat()
+            elif usage in (0x80, 0x81):
+                self._start_volume_repeat(usage, name)
+            elif self._is_mouse_wheel_action(name):
+                self._start_mapping_repeat(usage, name)
+        print(f"XIAOMI HID DIRECT key={name} usage=0x{usage:04X} mapped={str(triggered).lower()}", flush=True)
 
     def reset_direct_hid_state(self) -> None:
         with self.direct_state_lock:
@@ -1367,7 +1371,7 @@ async def bridge_once(
     voice_trigger_mode: str,
     stop_event: asyncio.Event,
     action_guard: XiaomiTvActionGate,
-    special_keys: XiaomiSpecialKeyHook,
+    special_keys: XiaomiSpecialKeyHook | None,
 ) -> None:
     print(f"CONNECTING remote={address}", flush=True)
     device = await BluetoothLEDevice.from_bluetooth_address_async(address_to_int(address))
@@ -1414,7 +1418,8 @@ async def bridge_once(
         # XiaomiHidReportTap handles 0xF1 before kbdhid drops it.  Keep this
         # direct path as a fallback for machines intentionally using generic
         # GATT instead of the Microsoft HID driver.
-        hid_session = await XiaomiGattHidSession.open(device, events)
+        if special_keys is not None:
+            hid_session = await XiaomiGattHidSession.open(device, events)
 
         # PortAudio and WinRT GATT deadlock if initialized in one process on
         # this machine, so the hub owns PortAudio in a separate router role.
@@ -1537,7 +1542,8 @@ async def bridge_once(
                     if sample_rate != 16000:
                         raise RuntimeError("this bridge currently requires ATVV 16 kHz audio")
                 elif opcode == 0x08:
-                    special_keys.mark_voice_signal()
+                    if special_keys is not None:
+                        special_keys.mark_voice_signal()
                     if in_continuation or continuing_until is not None:
                         # Mic pressed again while an auto-continued segment runs: stop it.
                         continuing_until = None
@@ -1547,7 +1553,8 @@ async def bridge_once(
                     await write_command(tx, bytes((0x0C, 0x00)), "MIC_OPEN")
                     mic_opened = True
                 elif opcode == 0x04:
-                    special_keys.mark_voice_signal()
+                    if special_keys is not None:
+                        special_keys.mark_voice_signal()
                     streaming = True
                     last_mic_off_at = None
                     segment_started_at = time.monotonic()
@@ -1626,7 +1633,7 @@ async def bridge_once(
                     pending_sync = (predictor, step_index)
                 continue
 
-            if channel.startswith("hid:"):
+            if special_keys is not None and channel.startswith("hid:"):
                 try:
                     report_id = int(channel.partition(":")[2])
                 except ValueError:
@@ -1690,7 +1697,8 @@ async def bridge_once(
                         flush=True,
                     )
     finally:
-        special_keys.reset_direct_hid_state()
+        if special_keys is not None:
+            special_keys.reset_direct_hid_state()
         voice_shortcut.release()
         if mic_opened and service is not None:
             try:
@@ -1723,7 +1731,7 @@ async def bridge_once(
 async def run(
     args: argparse.Namespace,
     action_guard: XiaomiTvActionGate,
-    special_keys: XiaomiSpecialKeyHook,
+    special_keys: XiaomiSpecialKeyHook | None,
 ) -> int:
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -1794,7 +1802,7 @@ def main(argv: list[str] | None = None) -> int:
     configured_voice_hotkey = "+".join(configured_voice_keys)
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default=str(config_path))
-    parser.add_argument("--address", default=config.get("address", DEFAULT_ADDRESS))
+    parser.add_argument("--address", default="")
     parser.add_argument("--gain-db", type=float, default=float(config.get("gain_db", 4.0)))
     parser.add_argument(
         "--retry-delay", type=float, default=float(config.get("retry_delay", 3.0))
@@ -1810,21 +1818,25 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args(argv)
-    raw_argv = list(argv or [])
-    explicit_address = ""
-    for index, item in enumerate(raw_argv):
-        if item == "--address" and index + 1 < len(raw_argv):
-            explicit_address = raw_argv[index + 1]
-            break
-        if item.startswith("--address="):
-            explicit_address = item.split("=", 1)[1]
-            break
-    args.address = discover_and_apply_xiaomi_identity(
-        config,
-        keys_config,
-        config_path,
-        explicit_address=explicit_address,
-    )
+    explicit_address = args.address
+    input_backend = config["input_backend"]
+    driver_input = input_backend == "quarbor"
+    if driver_input:
+        from .quarbor_input import QuarborInput, quarbor_remote_address
+
+        # Pair keys and voice with the same device even while it is asleep.
+        args.address = quarbor_remote_address(config["quarbor_device_instance"])
+        if explicit_address and normalize_bluetooth_address(explicit_address) != args.address:
+            parser.error("--address must match the remote selected for Quarbor input")
+    elif input_backend == "legacy":
+        args.address = discover_and_apply_xiaomi_identity(
+            config,
+            keys_config,
+            config_path,
+            explicit_address=explicit_address,
+        )
+    else:
+        parser.error(f"unknown input_backend: {input_backend!r}")
     try:
         resolve_hotkey_virtual_keys(args.voice_hotkey)
     except ValueError as exc:
@@ -1836,10 +1848,7 @@ def main(argv: list[str] | None = None) -> int:
         args.voice_hotkey = "+".join(DEFAULT_VOICE_HOTKEY)
     if not bool(config.get("voice_shortcut_enabled", True)):
         args.no_voice_shortcut = True
-    hid_tap_enabled = bool(config.get("hid_report_tap_enabled", True)) and bool(
-        config.get("hid_tap_compatible", False)
-    )
-    action_guard = XiaomiTvActionGate(config.get("tv_action_ready_delay", 2.0))
+    action_guard = XiaomiTvActionGate(0 if driver_input else config.get("tv_action_ready_delay", 2.0))
     def cycle_runtime_preset() -> str:
         preset = cycle_preset_configuration(config, keys_config)
         save_config(config, config_path)
@@ -1857,7 +1866,7 @@ def main(argv: list[str] | None = None) -> int:
 
     special_keys = XiaomiSpecialKeyHook(
         action_guard,
-        bool(config.get("special_key_hook_enabled", True)),
+        not driver_input and bool(config.get("special_key_hook_enabled", True)),
         float(config.get("back_repeat_delay", 0.28)),
         float(config.get("back_repeat_interval", 0.04)),
         float(config.get("volume_repeat_delay", 0.40)),
@@ -1865,33 +1874,43 @@ def main(argv: list[str] | None = None) -> int:
         keys_config.get("button_bindings", {}),
         cycle_runtime_preset,
     )
-    special_keys.start()
-    hid_report_tap = XiaomiHidReportTap(
-        special_keys.handle_direct_hid_report,
-        hid_tap_enabled,
-    )
-    hid_tap_started = hid_report_tap.start()
-    hid_tap_fallback_required = (
-        hid_tap_enabled and not hid_report_tap.dependency_available
-    )
-    start_raw_mapping_thread(
-        should_start_raw_mapping(
-            bool(config.get("raw_mapping_enabled", True)),
-            hid_tap_started,
-            hid_tap_fallback_required,
-        ),
-        action_guard,
-        cycle_runtime_preset,
-    )
-    # Arm TV once the key-mapping paths are installed. Voice GATT may connect,
-    # disconnect or be unavailable without disabling any configured button.
-    action_guard.mark_ready()
+    if driver_input:
+        key_source = QuarborInput(
+            config["quarbor_device_instance"],
+            special_keys.handle_driver_key,
+            special_keys.reset_direct_hid_state,
+        )
+    else:
+        from .hid_report_tap import XiaomiHidReportTap
+
+        hid_tap_enabled = bool(config.get("hid_report_tap_enabled", True)) and bool(
+            config.get("hid_tap_compatible", False)
+        )
+        key_source = XiaomiHidReportTap(
+            special_keys.handle_direct_hid_report, hid_tap_enabled
+        )
     try:
-        return asyncio.run(run(args, action_guard, special_keys))
+        if driver_input:
+            action_guard.mark_ready()
+            key_source.start()
+        else:
+            special_keys.start()
+            tap_started = key_source.start()
+            start_raw_mapping_thread(
+                should_start_raw_mapping(
+                    bool(config.get("raw_mapping_enabled", True)),
+                    tap_started,
+                    hid_tap_enabled and not key_source.dependency_available,
+                ),
+                action_guard,
+                cycle_runtime_preset,
+            )
+            action_guard.mark_ready()
+        return asyncio.run(run(args, action_guard, None if driver_input else special_keys))
     except KeyboardInterrupt:
         return 130
     finally:
-        hid_report_tap.stop()
+        key_source.stop()
         special_keys.stop()
 
 

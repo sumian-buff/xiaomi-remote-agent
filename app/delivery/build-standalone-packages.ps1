@@ -63,7 +63,7 @@ if ($packagedGadget.Count -ne 1 -or
 $archiveListing = (& $BuildPython -m PyInstaller.utils.cliutils.archive_viewer -r -b $exe) -join "`n"
 if ($LASTEXITCODE -ne 0) { throw "Cannot inspect packaged executable" }
 foreach ($module in @('winrt.windows.foundation', 'winrt.windows.foundation.collections',
-    'bridges.xiaomi.hid_tap_injector', 'standalone.default_microphone')) {
+    'bridges.xiaomi.hid_tap_injector', 'bridges.xiaomi.quarbor_input', 'standalone.default_microphone')) {
   if ($archiveListing -notmatch [regex]::Escape($module)) { throw "Missing packaged module: $module" }
 }
 if ($archiveListing -match 'bridges\.(t1|hanvon)|standalone\.windows_update') {

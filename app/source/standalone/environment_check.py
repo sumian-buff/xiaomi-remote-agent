@@ -137,6 +137,7 @@ def evaluate_environment(
     remote_ready = any(marker in bridge_log for marker in (
         "READY remote=",
         "CONNECTED remote=",
+        "XIAOMI QUARBOR connected to selected RC003",
         "XIAOMI HID TAP READY",
         "XIAOMI HID TAP ATTACHED",
     ))

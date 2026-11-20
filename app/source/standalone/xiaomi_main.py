@@ -26,7 +26,7 @@ from process_utils import CREATE_NO_WINDOW, hidden_startupinfo
 
 
 APP_NAME = "Xiaomi Remote Agent"
-APP_VERSION = "0.1.24"
+APP_VERSION = "0.1.25"
 APP_ID = "XiaomiRemoteAgent"
 CONTROL_PORT = 32690
 
@@ -788,7 +788,7 @@ class XiaomiApp:
         status = self.workers.status()
         if status["bridge_alive"] and status["audio_alive"]:
             text = "按键桥接和小米语音均已运行"
-            detail = "遥控器已配对后即可使用；首次完整按键接管可能出现一次 Windows 管理员确认。"
+            detail = "按一下遥控器唤醒。按住麦克风说话，按音量键滚动，按返回键退格。"
             color = "#2fa84f"
         elif status["bridge_alive"]:
             text = "普通按键已运行，语音环境未就绪"
